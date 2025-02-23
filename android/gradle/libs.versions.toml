@@ -7,6 +7,7 @@ junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 appcompat = "1.7.0"
 material = "1.12.0"
+mapbox = "3.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -15,8 +16,13 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+mapbox-android = { module = "com.mapbox.navigationcore:android", version.ref = "mapbox" }
+mapbox-navigation = { module = "com.mapbox.navigationcore:navigation", version.ref = "mapbox" }
+mapbox-tripdata = { module = "com.mapbox.navigationcore:tripdata", version.ref = "mapbox" }
+mapbox-ui-components = { module = "com.mapbox.navigationcore:ui-components", version.ref = "mapbox" }
+mapbox-ui-maps = { module = "com.mapbox.navigationcore:ui-maps", version.ref = "mapbox" }
+mapbox-voice = { module = "com.mapbox.navigationcore:voice", version.ref = "mapbox" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
-

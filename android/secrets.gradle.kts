@@ -1,6 +1,7 @@
 import java.io.File
 import java.util.Properties
 
+// TODO: support configurtion cache
 val secretsFile = File(rootDir, "secrets.properties")
 val secrets = Properties().apply {
     if (secretsFile.exists()) {

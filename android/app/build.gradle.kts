@@ -18,7 +18,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        resValue("string", "mapbox_public_token", extra["MAPBOX_PUBLIC_TOKEN"] as String)
+        resValue("string", "mapbox_access_token", extra["MAPBOX_PUBLIC_TOKEN"] as String)
     }
 
     buildTypes {
@@ -40,6 +40,13 @@ android {
 }
 
 dependencies {
+    // TODO: remove unused dependencies
+    implementation(libs.mapbox.android)
+    implementation(libs.mapbox.navigation)
+    implementation(libs.mapbox.tripdata)
+    implementation(libs.mapbox.ui.components)
+    implementation(libs.mapbox.ui.maps)
+    implementation(libs.mapbox.voice)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
