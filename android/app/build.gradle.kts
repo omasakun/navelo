@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.mapbox.ui.components)
     implementation(libs.mapbox.ui.maps)
     implementation(libs.mapbox.voice)
+    implementation(libs.mapbox.compose)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
