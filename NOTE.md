@@ -15,3 +15,5 @@
 
 - 依存関係を減らす
   - security risk
+- ライセンス表示
+  - Lucide icons

@@ -43,7 +43,7 @@ import kotlinx.coroutines.launch
 import net.o137.navelo.ui.theme.NaveloTheme
 import net.o137.navelo.utils.RequestLocationPermission
 
-class MainActivity : ComponentActivity() {
+class MapActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
