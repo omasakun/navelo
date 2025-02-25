@@ -9,30 +9,30 @@ import androidx.compose.ui.platform.LocalContext
 
 @Composable
 public fun RequestLocationPermission(
-    requestCount: Int = 0,
-    onPermissionDenied: () -> Unit,
-    onPermissionReady: () -> Unit
+  requestCount: Int = 0,
+  onPermissionDenied: () -> Unit,
+  onPermissionReady: () -> Unit
 ) {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { permissionsMap ->
-        if (permissionsMap.values.all { it }) {
-            onPermissionReady()
-        } else {
-            onPermissionDenied()
-        }
+  val context = LocalContext.current
+  val launcher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions(),
+  ) { permissionsMap ->
+    if (permissionsMap.values.all { it }) {
+      onPermissionReady()
+    } else {
+      onPermissionDenied()
     }
-    LaunchedEffect(requestCount) {
-        if (locationPermissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
-            onPermissionReady()
-        } else {
-            launcher.launch(locationPermissions)
-        }
+  }
+  LaunchedEffect(requestCount) {
+    if (locationPermissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+      onPermissionReady()
+    } else {
+      launcher.launch(locationPermissions)
     }
+  }
 }
 
 private val locationPermissions = arrayOf(
-    android.Manifest.permission.ACCESS_FINE_LOCATION,
-    android.Manifest.permission.ACCESS_COARSE_LOCATION
+  android.Manifest.permission.ACCESS_FINE_LOCATION,
+  android.Manifest.permission.ACCESS_COARSE_LOCATION
 )

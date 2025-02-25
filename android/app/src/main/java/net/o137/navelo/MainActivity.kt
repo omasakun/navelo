@@ -44,129 +44,129 @@ import net.o137.navelo.ui.theme.NaveloTheme
 import net.o137.navelo.utils.RequestLocationPermission
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            val context = LocalContext.current
-            val snackbarHostState = remember { SnackbarHostState() }
-            val scope = rememberCoroutineScope()
-            var permissionRequestCount by remember {
-                mutableStateOf(1)
-            }
-            var showRequestPermissionButton by remember {
-                mutableStateOf(false)
-            }
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    enableEdgeToEdge()
+    setContent {
+      val context = LocalContext.current
+      val snackbarHostState = remember { SnackbarHostState() }
+      val scope = rememberCoroutineScope()
+      var permissionRequestCount by remember {
+        mutableStateOf(1)
+      }
+      var showRequestPermissionButton by remember {
+        mutableStateOf(false)
+      }
 
-            val mapViewportState = rememberMapViewportState {
-                setCameraOptions {
-                    center(Point.fromLngLat(139.7916227, 35.713481))
-                    zoom(ZOOM)
-                    pitch(PITCH)
-                }
-            }
-
-            val followPuckOptions = remember {
-                FollowPuckViewportStateOptions.Builder().pitch(0.0).build()
-            }
-            val transitionOptions = remember {
-                DefaultViewportTransitionOptions.Builder().maxDurationMs(1000).build()
-            }
-
-            NaveloTheme {
-                Scaffold(
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    floatingActionButton = {
-                        if (mapViewportState.mapViewportStatus == ViewportStatus.Idle) {
-                            FloatingActionButton(
-                                onClick = {
-                                    mapViewportState.transitionToFollowPuckState(
-                                        followPuckOptions,
-                                        transitionOptions
-                                    )
-                                }
-                            ) {
-                                Image(
-                                    painter = painterResource(id = android.R.drawable.ic_menu_mylocation),
-                                    contentDescription = "Locate button"
-                                )
-                            }
-                        }
-                    }
-                ) { innerPadding ->
-                    RequestLocationPermission(
-                        requestCount = permissionRequestCount,
-                        onPermissionDenied = {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("You need to accept location permissions.")
-                            }
-                            showRequestPermissionButton = true
-                        },
-                        onPermissionReady = {
-                            showRequestPermissionButton = false
-                        }
-                    )
-                    MapboxMap(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding),
-                        compass = { Compass(modifier = Modifier.padding(16.dp)) },
-                        scaleBar = { ScaleBar(modifier = Modifier.padding(16.dp)) },
-                        attribution = { Attribution(modifier = Modifier.padding(16.dp)) },
-                        logo = { Logo(modifier = Modifier.padding(16.dp)) },
-                        style = {
-                            MapStyle(Style.MAPBOX_STREETS)
-                        },
-                        mapViewportState = mapViewportState
-                    ) {
-                        MapEffect(Unit) { mapView ->
-                            mapView.location.updateSettings {
-                                enabled = true
-                                locationPuck = createDefault2DPuck(withBearing = true)
-                                puckBearingEnabled = true
-                                puckBearing = PuckBearing.HEADING
-                                showAccuracyRing = true
-                            }
-                            mapViewportState.transitionToFollowPuckState(
-                                followPuckOptions,
-                                DefaultViewportTransitionOptions.Builder().maxDurationMs(0).build()
-                            )
-                        }
-                    }
-                    if (showRequestPermissionButton) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            Column(modifier = Modifier.align(Alignment.Center)) {
-                                Button(
-                                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                                    onClick = {
-                                        permissionRequestCount += 1
-                                    }
-                                ) {
-                                    Text("Request permission again ($permissionRequestCount)")
-                                }
-                                Button(
-                                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                                    onClick = {
-                                        context.startActivity(
-                                            Intent(
-                                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                                Uri.fromParts("package", packageName, null)
-                                            )
-                                        )
-                                    }
-                                ) {
-                                    Text("Show App Settings page")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+      val mapViewportState = rememberMapViewportState {
+        setCameraOptions {
+          center(Point.fromLngLat(139.7916227, 35.713481))
+          zoom(ZOOM)
+          pitch(PITCH)
         }
-    }
+      }
 
-    private companion object {
-        const val ZOOM: Double = 9.0
-        const val PITCH: Double = 0.0
+      val followPuckOptions = remember {
+        FollowPuckViewportStateOptions.Builder().pitch(0.0).build()
+      }
+      val transitionOptions = remember {
+        DefaultViewportTransitionOptions.Builder().maxDurationMs(1000).build()
+      }
+
+      NaveloTheme {
+        Scaffold(
+          snackbarHost = { SnackbarHost(snackbarHostState) },
+          floatingActionButton = {
+            if (mapViewportState.mapViewportStatus == ViewportStatus.Idle) {
+              FloatingActionButton(
+                onClick = {
+                  mapViewportState.transitionToFollowPuckState(
+                    followPuckOptions,
+                    transitionOptions
+                  )
+                }
+              ) {
+                Image(
+                  painter = painterResource(id = android.R.drawable.ic_menu_mylocation),
+                  contentDescription = "Locate button"
+                )
+              }
+            }
+          }
+        ) { innerPadding ->
+          RequestLocationPermission(
+            requestCount = permissionRequestCount,
+            onPermissionDenied = {
+              scope.launch {
+                snackbarHostState.showSnackbar("You need to accept location permissions.")
+              }
+              showRequestPermissionButton = true
+            },
+            onPermissionReady = {
+              showRequestPermissionButton = false
+            }
+          )
+          MapboxMap(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(innerPadding),
+            compass = { Compass(modifier = Modifier.padding(16.dp)) },
+            scaleBar = { ScaleBar(modifier = Modifier.padding(16.dp)) },
+            attribution = { Attribution(modifier = Modifier.padding(16.dp)) },
+            logo = { Logo(modifier = Modifier.padding(16.dp)) },
+            style = {
+              MapStyle(Style.MAPBOX_STREETS)
+            },
+            mapViewportState = mapViewportState
+          ) {
+            MapEffect(Unit) { mapView ->
+              mapView.location.updateSettings {
+                enabled = true
+                locationPuck = createDefault2DPuck(withBearing = true)
+                puckBearingEnabled = true
+                puckBearing = PuckBearing.HEADING
+                showAccuracyRing = true
+              }
+              mapViewportState.transitionToFollowPuckState(
+                followPuckOptions,
+                DefaultViewportTransitionOptions.Builder().maxDurationMs(0).build()
+              )
+            }
+          }
+          if (showRequestPermissionButton) {
+            Box(modifier = Modifier.fillMaxSize()) {
+              Column(modifier = Modifier.align(Alignment.Center)) {
+                Button(
+                  modifier = Modifier.align(Alignment.CenterHorizontally),
+                  onClick = {
+                    permissionRequestCount += 1
+                  }
+                ) {
+                  Text("Request permission again ($permissionRequestCount)")
+                }
+                Button(
+                  modifier = Modifier.align(Alignment.CenterHorizontally),
+                  onClick = {
+                    context.startActivity(
+                      Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", packageName, null)
+                      )
+                    )
+                  }
+                ) {
+                  Text("Show App Settings page")
+                }
+              }
+            }
+          }
+        }
+      }
     }
+  }
+
+  private companion object {
+    const val ZOOM: Double = 9.0
+    const val PITCH: Double = 0.0
+  }
 }

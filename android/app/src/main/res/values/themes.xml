@@ -1,4 +1,4 @@
 <resources>
-    <!-- Base application theme. -->
-    <style name="Theme.Navelo" parent="android:Theme.Material.Light.NoActionBar" />
+  <!-- Base application theme. -->
+  <style name="Theme.Navelo" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>
