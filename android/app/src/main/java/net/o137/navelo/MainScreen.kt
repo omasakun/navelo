@@ -1,20 +1,12 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class)
 
 package net.o137.navelo
 
-import android.os.Bundle
 import android.os.Parcelable
 import android.util.Log
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,14 +14,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.BottomAppBarDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,13 +39,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
-import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -70,86 +64,27 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Bookmark
 import com.composables.icons.lucide.CornerUpRight
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Link
+import com.composables.icons.lucide.Locate
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.MapPin
+import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
-import com.composables.icons.lucide.Settings2
+import com.composables.icons.lucide.Settings
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
-import kotlinx.serialization.Serializable
-import net.o137.navelo.ui.theme.NaveloTheme
 
-class MainActivity : ComponentActivity() {
-  override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-    enableEdgeToEdge()
-    setContent {
-      App()
-    }
-  }
-
-}
 
 @Composable
-private fun App() {
-  NaveloTheme {
-    val navController = rememberNavController()
-    NavHost(navController, startDestination = Route.Main,
-      enterTransition = { slideInHorizontally(initialOffsetX = { it }) },
-      exitTransition = { ExitTransition.None },
-      popEnterTransition = { EnterTransition.None },
-      popExitTransition = { slideOutHorizontally(targetOffsetX = { it }) }
-    ) {
-      composable<Route.Main> { MainScreen(navController) }
-      composable<Route.Settings> { SettingsScreen(navController) }
-    }
-  }
-}
-
-private sealed class Route {
-  @Serializable
-  object Main
-
-  @Serializable
-  object Settings
-}
-
-@Composable
-private fun SettingsScreen(navController: NavController) {
-  Scaffold(
-    topBar = {
-      TopAppBar(
-        title = { Text(text = "Settings") },
-        navigationIcon = {
-          IconButton(onClick = { navController.navigateUp() }) {
-            Icon(Lucide.ArrowLeft, "Back")
-          }
-        }
-      )
-    }
-  ) {
-    Text(
-      modifier = Modifier.padding(it),
-      text = "Settings screen"
-    )
-  }
-}
-
-@Composable
-private fun MainScreen(navController: NavController) {
+fun MainScreen(navController: NavController) {
   val snackbarHostState = remember { SnackbarHostState() }
   val searchExpanded = rememberSaveable { mutableStateOf(false) }
   val showBookmarks = rememberSaveable { mutableStateOf(false) }
   val showPairingDialog = rememberSaveable { mutableStateOf(false) }
-  val bookmarksSheetState = rememberModalBottomSheetState()
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
   HandleSearchReset(searchExpanded, searchQuery)
@@ -157,11 +92,21 @@ private fun MainScreen(navController: NavController) {
   Scaffold(
     snackbarHost = { SnackbarHost(snackbarHostState) },
     modifier = Modifier.fillMaxSize(),
+    floatingActionButton = {
+      FloatingActionButton(
+        shape = CircleShape,
+        onClick = {
+          // TODO
+        },
+      ) {
+        Icon(Lucide.Locate, "Current location")
+      }
+    },
     bottomBar = { BottomNavigationBar(navController, showPairingDialog, showBookmarks) },
   ) {
     MainContent(Modifier.padding(it))
     SearchComponent(searchExpanded, searchQuery, snackbarHostState)
-    BookmarksSheet(showBookmarks, bookmarksSheetState)
+    BookmarksSheet(showBookmarks)
     PairingDialog(showPairingDialog)
   }
 }
@@ -189,7 +134,7 @@ private fun BottomNavigationBar(
     actions = {
       val menuExpanded = remember { mutableStateOf(false) }
       IconButton(onClick = { menuExpanded.value = true }) {
-        Icon(Lucide.EllipsisVertical, contentDescription = "More options")
+        Icon(Lucide.EllipsisVertical, contentDescription = "More actions")
       }
       NavigationMenu(navController, menuExpanded, showPairingDialog)
       IconButton(onClick = { showBookmarks.value = true }) {
@@ -198,7 +143,9 @@ private fun BottomNavigationBar(
     },
     floatingActionButton = {
       FloatingActionButton(
-        onClick = { /* do something */ },
+        onClick = {
+          navController.navigate(Route.Navigation)
+        },
         containerColor = BottomAppBarDefaults.bottomAppBarFabColor,
         elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation()
       ) {
@@ -232,7 +179,7 @@ private fun NavigationMenu(
         navController.navigate(Route.Settings)
         menuExpanded.value = false
       },
-      leadingIcon = { Icon(Lucide.Settings2, contentDescription = "Settings") },
+      leadingIcon = { Icon(Lucide.Settings, contentDescription = "Settings") },
       text = { Text("Settings") }
     )
   }
@@ -368,21 +315,84 @@ private fun SearchBarIcon(expanded: MutableState<Boolean>) {
   }
 }
 
+@Parcelize
+data class Bookmark(
+  val text: String,
+  val additionalInfo: String
+) : Parcelable
+
 @Composable
 private fun BookmarksSheet(
   showBookmarks: MutableState<Boolean>,
-  bookmarksSheetState: SheetState
 ) {
+  val bookmarks = rememberSaveable {
+    mutableStateOf(
+      listOf(
+        Bookmark("Bookmark 1", "Additional info"),
+        Bookmark("Bookmark 2", "Additional info"),
+        Bookmark("Bookmark 3", "Additional info"),
+      )
+    )
+  }
+  BookmarksSheetLayout(
+    showBookmarks = showBookmarks,
+    bookmarks = bookmarks.value,
+    onSelect = { /* do something */ },
+    onAdd = { /* do something */ }
+  )
+}
+
+@Composable
+private fun BookmarksSheetLayout(
+  showBookmarks: MutableState<Boolean>,
+  bookmarks: List<Bookmark>,
+  onSelect: (Bookmark) -> Unit,
+  onAdd: () -> Unit
+) {
+  val bookmarksSheetState = rememberModalBottomSheetState()
   if (showBookmarks.value) {
     ModalBottomSheet(
       modifier = Modifier.fillMaxHeight(),
       sheetState = bookmarksSheetState,
       onDismissRequest = { showBookmarks.value = false }
     ) {
-      Text(
-        "Swipe up to open sheet. Swipe down to dismiss.",
-        modifier = Modifier.padding(16.dp)
-      )
+      Column {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Text("Bookmarks", style = MaterialTheme.typography.headlineSmall)
+          Button(onClick = {
+            showBookmarks.value = false
+            onAdd()
+          }) {
+            Icon(
+              Lucide.Plus,
+              contentDescription = "Add",
+              modifier = Modifier.size(ButtonDefaults.IconSize)
+            )
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text("Add")
+          }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        bookmarks.forEach { suggestion ->
+          ListItem(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable {
+                showBookmarks.value = false
+                onSelect(suggestion)
+              },
+            leadingContent = { Icon(Lucide.Bookmark, contentDescription = null) },
+            headlineContent = { Text(suggestion.text) },
+            supportingContent = { Text(suggestion.additionalInfo) },
+          )
+        }
+      }
     }
   }
 }
