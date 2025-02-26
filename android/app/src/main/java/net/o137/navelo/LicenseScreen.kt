@@ -60,7 +60,7 @@ fun LicenseScreen(navController: NavController) {
         },
       )
     }
-  ) {
+  ) { innerPadding ->
     val context = LocalContext.current
     var licensesState by remember { mutableStateOf<List<LicenseEntry>?>(null) }
     var selectedLicense by remember { mutableStateOf<LicenseEntry?>(null) }
@@ -81,7 +81,7 @@ fun LicenseScreen(navController: NavController) {
       }
 
       else -> {
-        LazyColumn(modifier = Modifier.padding(it)) {
+        LazyColumn(modifier = Modifier.padding(innerPadding)) {
           items(licenses) { license ->
             val terms = license.terms.lines().first().trim()
 
@@ -121,15 +121,20 @@ fun LicenseBottomSheet(license: LicenseEntry, onDismiss: () -> Unit) {
   ) {
     Column(
       modifier = Modifier
-        .padding(vertical = 16.dp)
+        .fillMaxHeight()
         .verticalScroll(rememberScrollState())
+        .padding(vertical = 16.dp)
     ) {
       Text(
         text = license.name, style = MaterialTheme.typography.titleMedium,
         modifier = Modifier.padding(horizontal = 16.dp)
       )
       Spacer(modifier = Modifier.height(16.dp))
-      Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .horizontalScroll(rememberScrollState())
+      ) {
         Text(
           text = license.terms,
           style = MaterialTheme.typography.bodySmall,

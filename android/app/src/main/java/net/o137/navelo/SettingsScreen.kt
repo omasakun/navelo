@@ -78,12 +78,12 @@ fun SettingsScreen(navController: NavController) {
         }
       )
     }
-  ) {
+  ) { innerPadding ->
     ProvidePreferenceLocals {
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
-          .padding(it)
+          .padding(innerPadding)
       ) {
         preferenceCategory(
           key = "experiments",

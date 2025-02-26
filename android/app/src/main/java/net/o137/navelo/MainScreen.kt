@@ -3,11 +3,14 @@
 package net.o137.navelo
 
 import android.os.Parcelable
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -75,6 +78,11 @@ import com.composables.icons.lucide.MapPin
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
+import com.mapbox.geojson.Point
+import com.mapbox.maps.Style
+import com.mapbox.maps.extension.compose.MapboxMap
+import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
+import com.mapbox.maps.extension.compose.style.MapStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
@@ -104,8 +112,8 @@ fun MainScreen(navController: NavController) {
       }
     },
     bottomBar = { BottomNavigationBar(navController, showPairingDialog, showBookmarks) },
-  ) {
-    MainContent(Modifier.padding(it))
+  ) { innerPadding ->
+    MainContent(innerPadding)
     SearchComponent(searchExpanded, searchQuery, snackbarHostState)
     BookmarksSheet(showBookmarks)
     PairingDialog(showPairingDialog)
@@ -565,11 +573,37 @@ sealed class PairingState : Parcelable {
 
 
 @Composable
-private fun MainContent(modifier: Modifier = Modifier) {
-  Text(
-    text = "Hello, Android!",
-    modifier = modifier
-  )
+private fun MainContent(innerPadding: PaddingValues) {
+  val mapViewportState = rememberMapViewportState {
+    setCameraOptions {
+      center(Point.fromLngLat(139.7916227, 35.713481))
+      zoom(9.0)
+      pitch(0.0)
+    }
+  }
+
+  Log.d("Padding", innerPadding.toString())
+
+  MapboxMap(
+    // TODO: correct way to achieve edge-to-edge?
+    modifier = Modifier
+      .padding(bottom = innerPadding.calculateBottomPadding())
+      .consumeWindowInsets(PaddingValues(top = innerPadding.calculateTopPadding())),
+    compass = {
+      Compass(
+        modifier = Modifier
+          .padding(16.dp)
+          .padding(top = 64.dp + innerPadding.calculateTopPadding()) // add more padding
+      )
+    },
+    scaleBar = { },
+    attribution = { Attribution(modifier = Modifier.padding(16.dp)) },
+    logo = { Logo(modifier = Modifier.padding(16.dp)) },
+    style = { MapStyle(Style.MAPBOX_STREETS) },
+    mapViewportState = mapViewportState
+  ) {
+
+  }
 }
 
 private fun Rect.inset(dx: Float, dy: Float): Rect {

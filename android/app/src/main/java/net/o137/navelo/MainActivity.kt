@@ -5,7 +5,6 @@ package net.o137.navelo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -27,7 +26,8 @@ import net.o137.navelo.ui.theme.NaveloTheme
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    enableEdgeToEdge()
+    // TODO: WindowInsets とかについて理解してから、想定されてる方法で edge to edge を実現する
+    // enableEdgeToEdge()
     setContent {
       App()
     }
