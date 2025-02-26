@@ -1,8 +1,15 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package net.o137.navelo
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -11,18 +18,24 @@ import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.BottomAppBarDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +85,8 @@ fun NavigationScreen(navController: NavController) {
     showExitDialog = true
   }
 
+  val showRouteSheet = rememberSaveable { mutableStateOf(false) }
+
   Scaffold(
     bottomBar = {
       BottomAppBar(
@@ -87,6 +102,7 @@ fun NavigationScreen(navController: NavController) {
             DropdownMenuItem(
               onClick = {
                 showMenu = false
+                showRouteSheet.value = true
               },
               leadingIcon = { Icon(Lucide.Route, contentDescription = "Route") },
               text = { Text("Show route") }
@@ -156,5 +172,44 @@ fun NavigationScreen(navController: NavController) {
     },
   ) { innerPadding ->
     Text(modifier = Modifier.padding(innerPadding), text = "Navigation screen")
+
+    RouteSheet(showRouteSheet)
   }
 }
+
+@Composable
+private fun RouteSheet(showRouteSheet: MutableState<Boolean>) {
+  val sheetState = rememberModalBottomSheetState()
+
+  // TODO: better way to handle?
+  // 一度 expand したあとでそのまま閉じでもう一回開くときに、最大化された状態から縮むアニメーションになることを回避する意図
+  LaunchedEffect(showRouteSheet.value) {
+    if (!showRouteSheet.value) {
+      sheetState.hide()
+    }
+  }
+
+  if (showRouteSheet.value) {
+    ModalBottomSheet(
+      modifier = Modifier.fillMaxHeight(),
+      sheetState = sheetState,
+      onDismissRequest = { showRouteSheet.value = false },
+    ) {
+      Column {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Text("Route", style = MaterialTheme.typography.headlineSmall)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Route details")
+      }
+    }
+  }
+}
+
+

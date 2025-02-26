@@ -3,6 +3,7 @@ activityCompose = "1.10.0"
 agp = "8.7.3"
 appcompat = "1.7.0"
 composeBom = "2025.02.00"
+composePreference = "1.1.1"
 coreKtx = "1.15.0"
 espressoCore = "3.6.1"
 iconsLucideVersion = "1.0.0"
@@ -34,6 +35,7 @@ androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-man
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 composables-icons-lucide = { module = "com.composables:icons-lucide", version.ref = "iconsLucideVersion" }
+compose-preference = { module = "me.zhanghai.compose.preference:library", version.ref = "composePreference" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 mapbox-android = { module = "com.mapbox.navigationcore:android", version.ref = "mapboxNav" }

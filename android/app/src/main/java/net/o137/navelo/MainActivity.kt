@@ -6,13 +6,18 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -32,16 +37,24 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun App() {
   NaveloTheme {
-    val navController = rememberNavController()
-    NavHost(navController, startDestination = Route.Main,
-      enterTransition = { slideInHorizontally(initialOffsetX = { it }) },
-      exitTransition = { ExitTransition.None },
-      popEnterTransition = { EnterTransition.None },
-      popExitTransition = { slideOutHorizontally(targetOffsetX = { it }) }
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(MaterialTheme.colorScheme.background)
     ) {
-      composable<Route.Main> { MainScreen(navController) }
-      composable<Route.Settings> { SettingsScreen(navController) }
-      composable<Route.Navigation> { NavigationScreen(navController) }
+      val navController = rememberNavController()
+      NavHost(
+        navController = navController,
+        startDestination = Route.Main,
+        enterTransition = { slideInHorizontally(initialOffsetX = { it }) },
+        exitTransition = { fadeOut() },
+        popEnterTransition = { fadeIn() },
+        popExitTransition = { slideOutHorizontally(targetOffsetX = { it }) }
+      ) {
+        composable<Route.Main> { MainScreen(navController) }
+        composable<Route.Settings> { SettingsScreen(navController) }
+        composable<Route.Navigation> { NavigationScreen(navController) }
+      }
     }
   }
 }

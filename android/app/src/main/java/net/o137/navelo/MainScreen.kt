@@ -3,7 +3,6 @@
 package net.o137.navelo
 
 import android.os.Parcelable
-import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,17 +14,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialogDefaults
-import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.BottomAppBarDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,7 +39,6 @@ import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -59,12 +56,15 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.navigation.NavController
 import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.Bluetooth
 import com.composables.icons.lucide.Bookmark
 import com.composables.icons.lucide.CornerUpRight
 import com.composables.icons.lucide.EllipsisVertical
@@ -75,6 +75,7 @@ import com.composables.icons.lucide.MapPin
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 
@@ -200,25 +201,16 @@ private fun SearchComponent(
   val scope = rememberCoroutineScope()
   val searchResults = rememberSaveable {
     mutableStateOf(
-      listOf(
-        SearchResult("Search result 1", "Additional info"),
-        SearchResult("Search result 2", "Additional info"),
-        SearchResult("Search result 3", "Additional info"),
-      )
+      (0..20).map { SearchResult("Search result $it", "Additional info") }
     )
   }
   SearchComponentLayout(
     expanded = expanded,
     query = query,
     onQueryChange = { currentQuery ->
-      Log.d("SearchComponent", "Query changed: $currentQuery")
-
-      searchResults.value = listOf(
-        SearchResult("Search result $currentQuery", "Additional info"),
-        SearchResult("Search result 1", "Additional info"),
-        SearchResult("Search result 2", "Additional info"),
-        SearchResult("Search result 3", "Additional info"),
-      )
+      searchResults.value =
+        listOf(SearchResult("Search result $currentQuery", "Additional info")) +
+          (0..20).map { SearchResult("Search result $it", "Additional info") }
     },
     onSelect = {
       scope.launch {
@@ -266,18 +258,18 @@ private fun SearchComponentLayout(
       )
     },
   ) {
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-      searchResults.forEach { suggestion ->
+    LazyColumn {
+      items(searchResults) { searchResult ->
         ListItem(
           modifier = Modifier
             .fillMaxWidth()
             .clickable {
               expanded.value = false
-              onSelect(suggestion)
+              onSelect(searchResult)
             },
           leadingContent = { Icon(Lucide.MapPin, contentDescription = null) },
-          headlineContent = { Text(suggestion.text) },
-          supportingContent = { Text(suggestion.additionalInfo) },
+          headlineContent = { Text(searchResult.text) },
+          supportingContent = { Text(searchResult.additionalInfo) },
         )
       }
     }
@@ -327,11 +319,7 @@ private fun BookmarksSheet(
 ) {
   val bookmarks = rememberSaveable {
     mutableStateOf(
-      listOf(
-        Bookmark("Bookmark 1", "Additional info"),
-        Bookmark("Bookmark 2", "Additional info"),
-        Bookmark("Bookmark 3", "Additional info"),
-      )
+      (0..20).map { Bookmark("Bookmark $it", "Additional info") }
     )
   }
   BookmarksSheetLayout(
@@ -350,46 +338,59 @@ private fun BookmarksSheetLayout(
   onAdd: () -> Unit
 ) {
   val bookmarksSheetState = rememberModalBottomSheetState()
+
+  // TODO: better way to handle?
+  // 一度 expand したあとでそのまま閉じでもう一回開くときに、最大化された状態から縮むアニメーションになることを回避する意図
+  LaunchedEffect(showBookmarks.value) {
+    if (!showBookmarks.value) {
+      bookmarksSheetState.hide()
+    }
+  }
+
   if (showBookmarks.value) {
     ModalBottomSheet(
       modifier = Modifier.fillMaxHeight(),
       sheetState = bookmarksSheetState,
       onDismissRequest = { showBookmarks.value = false }
     ) {
-      Column {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-          Text("Bookmarks", style = MaterialTheme.typography.headlineSmall)
-          Button(onClick = {
-            showBookmarks.value = false
-            onAdd()
-          }) {
-            Icon(
-              Lucide.Plus,
-              contentDescription = "Add",
-              modifier = Modifier.size(ButtonDefaults.IconSize)
-            )
-            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text("Add")
+      LazyColumn {
+        item {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Text("Bookmarks", style = MaterialTheme.typography.headlineSmall)
+            Button(onClick = {
+              showBookmarks.value = false
+              onAdd()
+            }) {
+              Icon(
+                Lucide.Plus,
+                contentDescription = "Add",
+                modifier = Modifier.size(ButtonDefaults.IconSize)
+              )
+              Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+              Text("Add")
+            }
           }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        bookmarks.forEach { suggestion ->
+        item {
+          Spacer(modifier = Modifier.height(8.dp))
+        }
+        items(bookmarks) { bookmark ->
           ListItem(
             modifier = Modifier
               .fillMaxWidth()
               .clickable {
                 showBookmarks.value = false
-                onSelect(suggestion)
+                onSelect(bookmark)
               },
             leadingContent = { Icon(Lucide.Bookmark, contentDescription = null) },
-            headlineContent = { Text(suggestion.text) },
-            supportingContent = { Text(suggestion.additionalInfo) },
+            headlineContent = { Text(bookmark.text) },
+            supportingContent = { Text(bookmark.additionalInfo) },
           )
         }
       }
@@ -399,30 +400,169 @@ private fun BookmarksSheetLayout(
 
 @Composable
 private fun PairingDialog(openDialog: MutableState<Boolean>) {
+  PairingDialogLayout(
+    openDialog = openDialog,
+    getDevices = {
+      delay(1000)
+      listOf(
+        BluetoothDevice("Device A", "00:11:22:33:44:55"),
+        BluetoothDevice("Device B", "00:11:22:33:44:66"),
+        BluetoothDevice("Device C", "00:11:22:33:44:77")
+      )
+    },
+    pairDevice = { device ->
+      delay(2000)
+      (0..1).random() == 0
+    }
+  )
+}
+
+@Composable
+private fun PairingDialogLayout(
+  openDialog: MutableState<Boolean>,
+  getDevices: suspend () -> List<BluetoothDevice>,
+  pairDevice: suspend (BluetoothDevice) -> Boolean
+) {
+  val scope = rememberCoroutineScope()
+  val pairingState = rememberSaveable { mutableStateOf<PairingState>(PairingState.SCAN) }
+  val devices = remember { mutableStateOf<List<BluetoothDevice>?>(null) }
+
+  LaunchedEffect(openDialog.value) {
+    if (!openDialog.value) {
+      pairingState.value = PairingState.SCAN
+    }
+  }
+
   if (openDialog.value) {
-    BasicAlertDialog(
-      onDismissRequest = {}
-      // onDismissRequest = { openDialog.value = false }
-    ) {
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .wrapContentHeight(),
-        shape = MaterialTheme.shapes.large,
-        tonalElevation = AlertDialogDefaults.TonalElevation
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(text = "Pairing")
-          Spacer(modifier = Modifier.height(24.dp))
-          Row(modifier = Modifier.align(Alignment.End)) {
+    AlertDialog(
+      onDismissRequest = { /* Do nothing */ },
+      title = {
+        when (pairingState.value) {
+          is PairingState.COMPLETE -> {
+            Text("Connected")
+          }
+
+          is PairingState.FAILED -> {
+            Text("Failed to connect")
+          }
+
+          else -> {
+            Text("Connect")
+          }
+        }
+      },
+      text = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+          when (val state = pairingState.value) {
+            PairingState.SCAN -> {
+              Text(text = "Scanning for devices...")
+              Spacer(modifier = Modifier.height(16.dp))
+
+              LaunchedEffect(Unit) {
+                devices.value = null
+                devices.value = getDevices()
+              }
+
+              val currentDevices = devices.value
+              if (currentDevices == null) {
+                CircularProgressIndicator(
+                  modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(vertical = 16.dp)
+                )
+              } else {
+                Spacer(modifier = Modifier.height(16.dp))
+                LazyColumn(modifier = Modifier.negativePadding((-24).dp)) {
+                  items(currentDevices) { device ->
+                    ListItem(
+                      modifier = Modifier.clickable {
+                        pairingState.value = PairingState.PROGRESS(device)
+                        scope.launch {
+                          val success = pairDevice(device)
+                          pairingState.value = if (success) {
+                            PairingState.COMPLETE(device)
+                          } else {
+                            PairingState.FAILED(device)
+                          }
+                        }
+                      },
+                      leadingContent = { Icon(Lucide.Bluetooth, "Bluetooth") },
+                      headlineContent = { Text(text = device.name) },
+                      supportingContent = { Text(text = device.address) }
+                    )
+                  }
+                }
+              }
+            }
+
+            is PairingState.PROGRESS -> {
+              Text(text = "Connecting with ${state.device.name}...")
+              Spacer(modifier = Modifier.height(16.dp))
+              CircularProgressIndicator(
+                modifier = Modifier
+                  .align(Alignment.CenterHorizontally)
+                  .padding(vertical = 16.dp)
+              )
+            }
+
+            is PairingState.COMPLETE -> {
+              Text(text = "You have successfully connected with ${state.device.name}.")
+            }
+
+            is PairingState.FAILED -> {
+              Text(text = "Something went wrong while connecting with ${state.device.name}.")
+            }
+          }
+        }
+      },
+      confirmButton = {
+        when (pairingState.value) {
+          PairingState.SCAN -> {
+            TextButton(
+              enabled = devices.value != null,
+              onClick = {
+                if (devices.value != null) {
+                  scope.launch {
+                    devices.value = null
+                    devices.value = getDevices()
+                  }
+                }
+              }
+            ) { Text("Rescan") }
+          }
+
+          is PairingState.COMPLETE, is PairingState.FAILED -> {
+            TextButton(onClick = { openDialog.value = false }) { Text("OK") }
+          }
+
+          else -> {}
+        }
+      },
+      dismissButton = {
+        when (pairingState.value) {
+          is PairingState.COMPLETE, is PairingState.FAILED -> {}
+          else -> {
             TextButton(onClick = { openDialog.value = false }) { Text("Cancel") }
-            TextButton(onClick = { openDialog.value = false }) { Text("Confirm") }
           }
         }
       }
-    }
+    )
   }
 }
+
+
+@Parcelize
+data class BluetoothDevice(val name: String, val address: String) : Parcelable
+
+
+@Parcelize
+sealed class PairingState : Parcelable {
+  data object SCAN : PairingState()
+  data class PROGRESS(val device: BluetoothDevice) : PairingState()
+  data class COMPLETE(val device: BluetoothDevice) : PairingState()
+  data class FAILED(val device: BluetoothDevice) : PairingState()
+}
+
 
 @Composable
 private fun MainContent(modifier: Modifier = Modifier) {
@@ -434,4 +574,15 @@ private fun MainContent(modifier: Modifier = Modifier) {
 
 private fun Rect.inset(dx: Float, dy: Float): Rect {
   return Rect(left + dx, top + dy, right - dx, bottom - dy)
+}
+
+// TODO: better solution
+private fun Modifier.negativePadding(horizontal: Dp): Modifier {
+  return this.layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.offset((-horizontal * 2).roundToPx()))
+    layout(
+      width = placeable.width + (horizontal * 2).roundToPx(),
+      height = placeable.height
+    ) { placeable.place(horizontal.roundToPx(), 0) }
+  }
 }

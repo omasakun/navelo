@@ -48,6 +48,7 @@ android {
 dependencies {
   // TODO: remove unused dependencies
   implementation(libs.composables.icons.lucide)
+  implementation(libs.compose.preference)
   implementation(libs.mapbox.android)
   implementation(libs.mapbox.compose)
   implementation(libs.mapbox.navigation)
