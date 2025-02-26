@@ -52,8 +52,9 @@ private fun App() {
         popExitTransition = { slideOutHorizontally(targetOffsetX = { it }) }
       ) {
         composable<Route.Main> { MainScreen(navController) }
-        composable<Route.Settings> { SettingsScreen(navController) }
         composable<Route.Navigation> { NavigationScreen(navController) }
+        composable<Route.Settings> { SettingsScreen(navController) }
+        composable<Route.License> { LicenseScreen(navController) }
       }
     }
   }
@@ -64,8 +65,11 @@ sealed class Route {
   object Main
 
   @Serializable
+  object Navigation
+
+  @Serializable
   object Settings
 
   @Serializable
-  object Navigation
+  object License
 }

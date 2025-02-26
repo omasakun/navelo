@@ -6,6 +6,7 @@ plugins {
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.kotlin.parcelize)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.oss.licenses.plugin)
 }
 
 android {
@@ -25,8 +26,11 @@ android {
   }
 
   buildTypes {
+    debug {
+      // isDebuggable = false
+    }
     release {
-      isMinifyEnabled = false
+      isMinifyEnabled = true
       proguardFiles(
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro"

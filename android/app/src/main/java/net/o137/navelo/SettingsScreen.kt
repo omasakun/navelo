@@ -2,6 +2,8 @@
 
 package net.o137.navelo
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -45,6 +48,7 @@ fun SettingsScreen(navController: NavController) {
           }
         },
         actions = {
+          val context = LocalContext.current
           var showMenu by remember { mutableStateOf(false) }
           IconButton(onClick = { showMenu = !showMenu }) {
             Icon(Lucide.EllipsisVertical, contentDescription = "More actions")
@@ -57,14 +61,16 @@ fun SettingsScreen(navController: NavController) {
             DropdownMenuItem(
               onClick = {
                 showMenu = false
-                // TODO
+                navController.navigate(Route.License)
               },
-              text = { Text("Open source licenses") }
+              text = { Text("License notice") }
             )
             DropdownMenuItem(
               onClick = {
                 showMenu = false
-                // TODO
+                // TODO: Update the URL
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://navelo.net"))
+                context.startActivity(intent)
               },
               text = { Text("Website") }
             )

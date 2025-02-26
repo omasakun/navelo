@@ -16,6 +16,7 @@ mapbox = "11.10.0"
 mapboxNav = "3.7.0"
 material = "1.12.0"
 navigationCompose = "2.8.7"
+ossLicensesPlugin = "0.10.6"
 serialization = "2.1.10"
 
 [libraries]
@@ -46,6 +47,7 @@ mapbox-ui-components = { module = "com.mapbox.navigationcore:ui-components", ver
 mapbox-ui-maps = { module = "com.mapbox.navigationcore:ui-maps", version.ref = "mapboxNav" }
 mapbox-voice = { module = "com.mapbox.navigationcore:voice", version.ref = "mapboxNav" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+oss-licenses-plugin = { module = "com.google.android.gms:oss-licenses-plugin", version.ref = "ossLicensesPlugin" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -53,3 +55,4 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "serialization" }
 kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize" }
+oss-licenses-plugin = { id = "com.google.android.gms.oss-licenses-plugin" }
