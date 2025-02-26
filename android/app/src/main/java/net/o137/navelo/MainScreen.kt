@@ -2,8 +2,14 @@
 
 package net.o137.navelo
 
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Parcelable
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -48,10 +54,13 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -60,11 +69,13 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.offset
+import androidx.core.app.ActivityCompat
 import androidx.navigation.NavController
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Bluetooth
@@ -79,17 +90,25 @@ import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
 import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraState
 import com.mapbox.maps.Style
+import com.mapbox.maps.extension.compose.MapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
-import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
+import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
 import com.mapbox.maps.extension.compose.style.MapStyle
+import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
+import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.maps.plugin.viewport.ViewportStatus
+import com.mapbox.maps.plugin.viewport.data.DefaultViewportTransitionOptions
+import com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 
-
 @Composable
 fun MainScreen(navController: NavController) {
+  val fullMapState = rememberFullMapState()
   val snackbarHostState = remember { SnackbarHostState() }
   val searchExpanded = rememberSaveable { mutableStateOf(false) }
   val showBookmarks = rememberSaveable { mutableStateOf(false) }
@@ -97,23 +116,30 @@ fun MainScreen(navController: NavController) {
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
   HandleSearchReset(searchExpanded, searchQuery)
+  RequestLocationPermission(fullMapState)
 
   Scaffold(
     snackbarHost = { SnackbarHost(snackbarHostState) },
     modifier = Modifier.fillMaxSize(),
     floatingActionButton = {
-      FloatingActionButton(
-        shape = CircleShape,
-        onClick = {
-          // TODO
-        },
-      ) {
-        Icon(Lucide.Locate, "Current location")
+      if (!fullMapState.isFollowingPuck() || !fullMapState.isPermissionReady()) {
+        FloatingActionButton(
+          shape = CircleShape,
+          onClick = {
+            if (fullMapState.isPermissionReady()) {
+              fullMapState.transitionToFollowPuckState()
+            } else {
+              fullMapState.requestLocationPermission()
+            }
+          },
+        ) {
+          Icon(Lucide.Locate, "Current location")
+        }
       }
     },
     bottomBar = { BottomNavigationBar(navController, showPairingDialog, showBookmarks) },
   ) { innerPadding ->
-    MainContent(innerPadding)
+    MainContent(innerPadding, fullMapState)
     SearchComponent(searchExpanded, searchQuery, snackbarHostState)
     BookmarksSheet(showBookmarks)
     PairingDialog(showPairingDialog)
@@ -558,10 +584,8 @@ private fun PairingDialogLayout(
   }
 }
 
-
 @Parcelize
 data class BluetoothDevice(val name: String, val address: String) : Parcelable
-
 
 @Parcelize
 sealed class PairingState : Parcelable {
@@ -571,17 +595,8 @@ sealed class PairingState : Parcelable {
   data class FAILED(val device: BluetoothDevice) : PairingState()
 }
 
-
 @Composable
-private fun MainContent(innerPadding: PaddingValues) {
-  val mapViewportState = rememberMapViewportState {
-    setCameraOptions {
-      center(Point.fromLngLat(139.7916227, 35.713481))
-      zoom(9.0)
-      pitch(0.0)
-    }
-  }
-
+private fun MainContent(innerPadding: PaddingValues, fullMapState: FullMapState) {
   Log.d("Padding", innerPadding.toString())
 
   MapboxMap(
@@ -600,11 +615,162 @@ private fun MainContent(innerPadding: PaddingValues) {
     attribution = { Attribution(modifier = Modifier.padding(16.dp)) },
     logo = { Logo(modifier = Modifier.padding(16.dp)) },
     style = { MapStyle(Style.MAPBOX_STREETS) },
-    mapViewportState = mapViewportState
+    mapViewportState = fullMapState.mapViewportState
   ) {
-
+    var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
+    MapEffect(Unit) { mapView ->
+      mapView.location.updateSettings {
+        enabled = true
+        locationPuck = createDefault2DPuck(withBearing = true)
+        puckBearingEnabled = true
+        puckBearing = PuckBearing.HEADING
+        showAccuracyRing = true
+      }
+      if (isFirstLaunch) {
+        fullMapState.immediatelyFollowPuckState()
+        isFirstLaunch = false
+      }
+    }
   }
 }
+
+@Composable
+private fun rememberFullMapState(): FullMapState {
+  return rememberSaveable(saver = FullMapState.Saver) {
+    FullMapState()
+  }
+}
+
+// TODO: better name
+@SuppressLint("AutoboxingStateCreation")
+private class FullMapState() {
+  var mapViewportState = MapViewportState().apply {
+    setCameraOptions {
+      center(Point.fromLngLat(139.692912, 35.688985)) // Tokyo
+      zoom(9.0)
+      pitch(0.0)
+    }
+  }
+
+  val followPuckOptions = FollowPuckViewportStateOptions.Builder().pitch(0.0).build()
+  val transitionOptions = DefaultViewportTransitionOptions.Builder().maxDurationMs(1000).build()
+
+  var permissionRequestCount by mutableStateOf(0)
+    private set
+  var permissionReady by mutableStateOf<Boolean?>(null)
+
+  fun transitionToFollowPuckState() {
+    mapViewportState.transitionToFollowPuckState(followPuckOptions, transitionOptions)
+  }
+
+  fun immediatelyFollowPuckState() {
+    mapViewportState.transitionToFollowPuckState(
+      followPuckOptions,
+      DefaultViewportTransitionOptions.Builder().maxDurationMs(0).build()
+    )
+  }
+
+  fun requestLocationPermission() {
+    permissionRequestCount++
+    Log.d("RequestLocationPermission", "$permissionRequestCount")
+  }
+
+  fun isFollowingPuck(): Boolean {
+    return mapViewportState.mapViewportStatus != ViewportStatus.Idle
+  }
+
+  fun isPermissionReady(): Boolean {
+    return permissionReady == true
+  }
+
+  public companion object {
+    public val Saver: Saver<FullMapState, SavedState> = Saver(
+      save = {
+        SavedState(
+          it.mapViewportState.cameraState,
+          it.permissionRequestCount,
+          it.permissionReady
+        )
+      },
+      restore = {
+        FullMapState().apply {
+          if (it.cameraState != null) mapViewportState = MapViewportState(it.cameraState)
+          permissionRequestCount = it.permissionRequestCount
+          permissionReady = it.permissionReady
+        }
+      }
+    )
+  }
+
+  @Parcelize
+  data class SavedState(
+    val cameraState: CameraState?,
+    val permissionRequestCount: Int,
+    val permissionReady: Boolean?
+  ) : Parcelable
+}
+
+@Composable
+private fun RequestLocationPermission(fullMapState: FullMapState) {
+  val context = LocalContext.current
+  val launcher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions(),
+  ) { permissionsMap ->
+    fullMapState.permissionReady = permissionsMap.values.all { it }
+  }
+
+  var showAlertDialog by remember { mutableStateOf(false) }
+
+  val requestCount = fullMapState.permissionRequestCount
+  LaunchedEffect(requestCount) {
+    if (locationPermissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+      fullMapState.permissionReady = true
+    } else {
+      val permanentlyDenied = locationPermissions.any {
+        !ActivityCompat.shouldShowRequestPermissionRationale(context as MainActivity, it)
+      }
+      if (permanentlyDenied) {
+        // don't show dialog without user interaction
+        if (requestCount > 0) {
+          showAlertDialog = true
+        }
+      } else {
+        launcher.launch(locationPermissions)
+      }
+    }
+  }
+
+  if (showAlertDialog) {
+    AlertDialog(
+      onDismissRequest = { showAlertDialog = false },
+      title = { Text("Permission Required") },
+      text = { Text("This app needs access to location information, but the permission has been permanently denied. Please change the settings.") },
+      confirmButton = {
+        TextButton(onClick = {
+          context.startActivity(
+            Intent(
+              android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+              Uri.fromParts("package", context.packageName, null)
+            )
+          )
+          showAlertDialog = false
+        }) {
+          Text("Go to Settings")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showAlertDialog = false }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+}
+
+private val locationPermissions = arrayOf(
+  android.Manifest.permission.ACCESS_FINE_LOCATION,
+  android.Manifest.permission.ACCESS_COARSE_LOCATION
+)
 
 private fun Rect.inset(dx: Float, dy: Float): Rect {
   return Rect(left + dx, top + dy, right - dx, bottom - dy)

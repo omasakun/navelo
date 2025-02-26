@@ -1,6 +1,5 @@
 <resources>
   <string name="app_name">Navelo</string>
   <string name="title_activity_main">Navelo</string>
-  <string name="title_activity_map">Map</string>
   <string name="title_activity_settings">Settings</string>
 </resources>
