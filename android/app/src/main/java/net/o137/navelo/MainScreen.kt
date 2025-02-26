@@ -71,6 +71,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -95,7 +96,10 @@ import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.MapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
+import com.mapbox.maps.extension.compose.annotation.generated.PointAnnotation
+import com.mapbox.maps.extension.compose.annotation.rememberIconImage
 import com.mapbox.maps.extension.compose.style.MapStyle
+import com.mapbox.maps.extension.style.layers.properties.generated.IconAnchor
 import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
@@ -109,6 +113,8 @@ import kotlinx.parcelize.Parcelize
 @Composable
 fun MainScreen(navController: NavController) {
   val fullMapState = rememberFullMapState()
+  val currentPoint = rememberSaveable { mutableStateOf<Point?>(null) }
+
   val snackbarHostState = remember { SnackbarHostState() }
   val searchExpanded = rememberSaveable { mutableStateOf(false) }
   val showBookmarks = rememberSaveable { mutableStateOf(false) }
@@ -139,7 +145,7 @@ fun MainScreen(navController: NavController) {
     },
     bottomBar = { BottomNavigationBar(navController, showPairingDialog, showBookmarks) },
   ) { innerPadding ->
-    MainContent(innerPadding, fullMapState)
+    MainContent(innerPadding, fullMapState, currentPoint)
     SearchComponent(searchExpanded, searchQuery, snackbarHostState)
     BookmarksSheet(showBookmarks)
     PairingDialog(showPairingDialog)
@@ -596,9 +602,11 @@ sealed class PairingState : Parcelable {
 }
 
 @Composable
-private fun MainContent(innerPadding: PaddingValues, fullMapState: FullMapState) {
-  Log.d("Padding", innerPadding.toString())
-
+private fun MainContent(
+  innerPadding: PaddingValues,
+  fullMapState: FullMapState,
+  currentPoint: MutableState<Point?>
+) {
   MapboxMap(
     // TODO: correct way to achieve edge-to-edge?
     modifier = Modifier
@@ -615,7 +623,19 @@ private fun MainContent(innerPadding: PaddingValues, fullMapState: FullMapState)
     attribution = { Attribution(modifier = Modifier.padding(16.dp)) },
     logo = { Logo(modifier = Modifier.padding(16.dp)) },
     style = { MapStyle(Style.MAPBOX_STREETS) },
-    mapViewportState = fullMapState.mapViewportState
+    mapViewportState = fullMapState.mapViewportState,
+    onMapClickListener = {
+      if (currentPoint.value == null) {
+        false
+      } else {
+        currentPoint.value = null
+        true
+      }
+    },
+    onMapLongClickListener = { point ->
+      currentPoint.value = point
+      true
+    }
   ) {
     var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
     MapEffect(Unit) { mapView ->
@@ -629,6 +649,19 @@ private fun MainContent(innerPadding: PaddingValues, fullMapState: FullMapState)
       if (isFirstLaunch) {
         fullMapState.immediatelyFollowPuckState()
         isFirstLaunch = false
+      }
+    }
+
+    // val markerPainter = rememberVectorPainter(Lucide.MapPin)
+    val markerId = R.drawable.ic_red_marker
+    val markerImage = rememberIconImage(markerId, painterResource(markerId))
+
+    val point = currentPoint.value
+    if (point != null) {
+      PointAnnotation(point) {
+        this.iconImage = markerImage
+        this.iconOffset = listOf(0.0, 115.0 / 500.0 * 52.0)
+        this.iconAnchor = IconAnchor.BOTTOM
       }
     }
   }
