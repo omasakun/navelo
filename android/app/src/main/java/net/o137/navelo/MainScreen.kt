@@ -444,11 +444,11 @@ private fun PairingDialog(openDialog: MutableState<Boolean>) {
     openDialog = openDialog,
     getDevices = {
       delay(1000)
-      listOf(
-        BluetoothDevice("Device A", "00:11:22:33:44:55"),
-        BluetoothDevice("Device B", "00:11:22:33:44:66"),
-        BluetoothDevice("Device C", "00:11:22:33:44:77")
-      )
+      (0..3).random().let { count ->
+        (0 until count * 5).map { index ->
+          BluetoothDevice("Device $index", "00:11:22:33:44:55")
+        }
+      }
     },
     pairDevice = { device ->
       delay(2000)
@@ -495,22 +495,29 @@ private fun PairingDialogLayout(
         Column(modifier = Modifier.fillMaxWidth()) {
           when (val state = pairingState.value) {
             PairingState.SCAN -> {
-              Text(text = "Scanning for devices...")
-              Spacer(modifier = Modifier.height(16.dp))
-
               LaunchedEffect(Unit) {
                 devices.value = null
                 devices.value = getDevices()
               }
 
               val currentDevices = devices.value
+
+              if (currentDevices == null) {
+                Text(text = "Scanning for devices...")
+              } else if (currentDevices.isEmpty()) {
+                Text(text = "No devices found.")
+                Text(text = "Please make sure the device is turned on.")
+              } else {
+                Text(text = "Select a device to connect.")
+              }
+              Spacer(modifier = Modifier.height(16.dp))
               if (currentDevices == null) {
                 CircularProgressIndicator(
                   modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .padding(vertical = 16.dp)
                 )
-              } else {
+              } else if (currentDevices.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 LazyColumn(modifier = Modifier.negativePadding((-24).dp)) {
                   items(currentDevices) { device ->
