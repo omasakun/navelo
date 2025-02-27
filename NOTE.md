@@ -15,5 +15,8 @@
 
 - 依存関係を減らす
   - security risk
-- ライセンス表示
-  - Lucide icons
+- internationalization
+- RTL
+- esp-espidf が tier 3 サポートになったらしいので、設定が簡単になったかも
+  - https://docs.esp-rs.org/book/installation/riscv.html
+  - espflash だけ入れればいいってこと？

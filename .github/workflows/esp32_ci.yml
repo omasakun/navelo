@@ -37,6 +37,8 @@ jobs:
           components: rust-src rustfmt clippy
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: esp32
       - name: Install ldproxy
         run: cargo install ldproxy
         working-directory: esp32
