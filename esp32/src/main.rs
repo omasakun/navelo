@@ -54,7 +54,6 @@ fn main() -> anyhow::Result<()> {
   let mut dy = 8;
   let radius: i32 = 20;
 
-  display.init()?;
   display.clear(BinaryColor::On)?;
   display.refresh_full()?;
 
@@ -65,7 +64,8 @@ fn main() -> anyhow::Result<()> {
       .into_styled(PrimitiveStyle::with_fill(BinaryColor::Off))
       .draw(&mut display)?;
 
-    display.refresh_partial()?;
+    display.refresh_partial_while_awake()?;
+    // display.refresh_partial()?;
 
     x += dx;
     y += dy;
@@ -77,7 +77,7 @@ fn main() -> anyhow::Result<()> {
       dy = -dy;
     }
 
-    sleep(Duration::from_millis(5000));
+    // sleep(Duration::from_millis(5000));
   }
 }
 
@@ -120,6 +120,17 @@ pub mod display {
   pub const WIDTH: u8 = 200;
   pub const HEIGHT: u8 = 200;
 
+  /** Epaper is sleeping most of the time */
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  pub enum DisplayState {
+    /** Normal operation */
+    Active,
+    /** No clock, no output load */
+    Sleep,
+    /** Can only be woken up by hardware reset */
+    DeepSleep,
+  }
+
   pub struct Weact154Display<SPI, DC, RST, BSY, DLY> {
     spi: SPI,
     dc: DC,
@@ -127,6 +138,7 @@ pub mod display {
     busy: BSY,
     delay: DLY,
     pixels: [u8; WIDTH as usize * HEIGHT as usize / 8],
+    state: DisplayState,
   }
 
   impl<SPI, DC, RST, BSY, DLY> Weact154Display<SPI, DC, RST, BSY, DLY>
@@ -145,63 +157,77 @@ pub mod display {
         busy,
         delay,
         pixels: [0; WIDTH as usize * HEIGHT as usize / 8],
+        state: DisplayState::DeepSleep,
       }
     }
 
-    pub fn init(&mut self) -> Result<(), DisplayError> {
-      self.reset.set_low().unwrap();
-      self.delay(10);
-      self.reset.set_high().unwrap();
+    pub fn state(&self) -> DisplayState {
+      self.state
+    }
+
+    pub fn sleep(&mut self) -> Result<(), DisplayError> {
       self.wait_busy()?;
-
-      self.send_command(SW_RESET)?;
-      self.wait_busy()?;
-
-      self.send_command(DRIVER_OUTPUT_CONTROL)?;
-      self.send_data(&[HEIGHT - 1, 0x00, 0x00])?;
-
-      self.send_command(DATA_ENTRY_MODE_SETTING)?;
-      self.send_data(&[0x03])?; // X/Y increment
-
-      // self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
-
-      self.send_command(BORDER_WAVEFORM_CONTROL)?;
-      self.send_data(&[0x05])?; // white border (black: LSB=0)
-
-      self.send_command(TEMPERATURE_SENSOR_SELECTION)?;
-      self.send_data(&[0x80])?; // internal temperature sensor
-
-      self.wait_busy()?;
+      self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
+      self.send_data(&[0b1000_0011])?; // disable analog & clock signal
+      self.send_command(MASTER_ACTIVATION)?;
+      self.send_command(NOP)?;
+      self.state = DisplayState::Sleep;
       Ok(())
     }
     pub fn deep_sleep(&mut self) -> Result<(), DisplayError> {
-      self.wait_busy()?;
-      self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
-      self.send_data(&[0x83])?; // disable analog/osc
-      self.send_command(MASTER_ACTIVATION)?;
-      self.send_command(NOP)?;
+      self.sleep()?;
 
       self.wait_busy()?;
       self.send_command(DEEP_SLEEP_MODE)?;
-      self.send_data(&[0x01])?;
+      self.send_data(&[0x01])?; // deep sleep mode 1
+      self.state = DisplayState::DeepSleep;
       Ok(())
     }
+
     pub fn refresh_full(&mut self) -> Result<(), DisplayError> {
-      self.wait_busy()?;
-
-      self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
-      self.send_command(WRITE_RAM)?;
-      self.send_pixels_data()?;
-
-      self.send_command(DISPLAY_UPDATE_CONTROL_1)?;
-      self.send_data(&[0x00])?; // display ram content
-      self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
-      self.send_data(&[0xf7])?; // display with mode 1
-      self.send_command(MASTER_ACTIVATION)?;
-      self.send_command(NOP)?;
+      self.refresh(0b1111_0111)?; // display with mode 1, then sleep
       Ok(())
     }
     pub fn refresh_partial(&mut self) -> Result<(), DisplayError> {
+      self.refresh(0b1111_1111)?; // display with mode 2, then sleep
+      Ok(())
+    }
+    pub fn refresh_partial_while_awake(&mut self) -> Result<(), DisplayError> {
+      self.refresh(0b1111_1100)?; // display with mode 2, without sleep
+      self.state = DisplayState::Active;
+      Ok(())
+    }
+
+    fn init(&mut self) -> Result<(), DisplayError> {
+      if self.state == DisplayState::DeepSleep {
+        self.reset.set_low().unwrap();
+        self.delay(10);
+        self.reset.set_high().unwrap();
+        self.delay(10);
+
+        self.send_command(SW_RESET)?;
+        self.wait_busy()?;
+
+        self.send_command(DRIVER_OUTPUT_CONTROL)?;
+        self.send_data(&[HEIGHT - 1, 0x00, 0x00])?;
+
+        self.send_command(DATA_ENTRY_MODE_SETTING)?;
+        self.send_data(&[0x03])?; // X/Y increment
+
+        // self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
+
+        self.send_command(BORDER_WAVEFORM_CONTROL)?;
+        self.send_data(&[0x01])?; // white border (black: LSB=0)
+
+        self.send_command(TEMPERATURE_SENSOR_SELECTION)?;
+        self.send_data(&[0x80])?; // internal temperature sensor
+
+        self.state = DisplayState::Sleep;
+      }
+      Ok(())
+    }
+    fn refresh(&mut self, mode: u8) -> Result<(), DisplayError> {
+      self.init()?;
       self.wait_busy()?;
 
       self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
@@ -211,12 +237,11 @@ pub mod display {
       self.send_command(DISPLAY_UPDATE_CONTROL_1)?;
       self.send_data(&[0x00])?; // display ram content
       self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
-      self.send_data(&[0xff])?; // display with mode 2
+      self.send_data(&[mode])?;
       self.send_command(MASTER_ACTIVATION)?;
       self.send_command(NOP)?;
       Ok(())
     }
-
     fn set_ram_area(&mut self, x: u8, y: u8, width: u8, height: u8) -> Result<(), DisplayError> {
       self.send_command(SET_RAM_X_ADDRESS_START_END_POSITION)?;
       self.send_data(&[x / 8, (x + width - 1) / 8])?;
@@ -238,24 +263,21 @@ pub mod display {
 
     fn send_command(&mut self, cmd: u8) -> Result<(), DisplayError> {
       self.dc.set_low().unwrap();
-      self.delay(10);
       self.spi.write(&[cmd]).unwrap();
       Ok(())
     }
     fn send_data(&mut self, data: &[u8]) -> Result<(), DisplayError> {
       self.dc.set_high().unwrap();
-      self.delay(10);
       self.spi.write(data).unwrap();
       Ok(())
     }
     fn send_pixels_data(&mut self) -> Result<(), DisplayError> {
       self.dc.set_high().unwrap();
-      self.delay(10);
       self.spi.write(&self.pixels).unwrap();
       Ok(())
     }
     fn wait_busy(&mut self) -> Result<(), DisplayError> {
-      self.delay(10);
+      self.delay(1);
       while self.busy.is_high().unwrap() {
         // NOTE: make sure busy pin is correctly connected!
         // println!("busy");
@@ -265,7 +287,7 @@ pub mod display {
     }
 
     pub fn clear(&mut self, color: BinaryColor) -> Result<(), DisplayError> {
-      self.pixels.fill(u8::from(color.is_on()) * 0xFF);
+      self.pixels.fill(u8::from(color.is_on()) * 0xff);
       Ok(())
     }
   }
