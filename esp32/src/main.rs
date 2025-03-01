@@ -1,9 +1,3 @@
-use std::{
-  thread::{sleep, spawn},
-  time::Duration,
-};
-
-use display::{Weact154Display, HEIGHT, WIDTH};
 use embedded_graphics::{
   pixelcolor::BinaryColor,
   prelude::*,
@@ -17,7 +11,9 @@ use esp_idf_hal::{gpio::AnyInputPin, prelude::*};
 use esp_idf_hal::{gpio::PinDriver, spi::SpiDeviceDriver};
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::sys;
-use log::info;
+
+use display::{Weact154Display, HEIGHT, WIDTH};
+use utils::spawn_heap_logger;
 
 fn main() -> anyhow::Result<()> {
   // It is necessary to call this function once.
@@ -29,6 +25,12 @@ fn main() -> anyhow::Result<()> {
   println!("Hello, world!");
   spawn_heap_logger();
 
+  // main_display()?;
+
+  Ok(())
+}
+
+pub fn main_display() -> anyhow::Result<()> {
   let peripherals = Peripherals::take()?;
   let delay = Delay::new_default();
 
@@ -79,19 +81,6 @@ fn main() -> anyhow::Result<()> {
 
     // sleep(Duration::from_millis(5000));
   }
-}
-
-fn spawn_heap_logger() {
-  spawn(move || loop {
-    unsafe {
-      info!(
-        "free heap: {} (min: {})",
-        sys::esp_get_free_heap_size(),
-        sys::esp_get_minimum_free_heap_size()
-      );
-    }
-    sleep(Duration::from_millis(5000));
-  });
 }
 
 /**
@@ -166,7 +155,7 @@ pub mod display {
     }
 
     pub fn sleep(&mut self) -> Result<(), DisplayError> {
-      self.wait_busy()?;
+      self.wait_until_idle()?;
       self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
       self.send_data(&[0b1000_0011])?; // disable analog & clock signal
       self.send_command(MASTER_ACTIVATION)?;
@@ -177,7 +166,7 @@ pub mod display {
     pub fn deep_sleep(&mut self) -> Result<(), DisplayError> {
       self.sleep()?;
 
-      self.wait_busy()?;
+      self.wait_until_idle()?;
       self.send_command(DEEP_SLEEP_MODE)?;
       self.send_data(&[0x01])?; // deep sleep mode 1
       self.state = DisplayState::DeepSleep;
@@ -206,7 +195,7 @@ pub mod display {
         self.delay(10);
 
         self.send_command(SW_RESET)?;
-        self.wait_busy()?;
+        self.wait_until_idle()?;
 
         self.send_command(DRIVER_OUTPUT_CONTROL)?;
         self.send_data(&[HEIGHT - 1, 0x00, 0x00])?;
@@ -228,7 +217,7 @@ pub mod display {
     }
     fn refresh(&mut self, mode: u8) -> Result<(), DisplayError> {
       self.init()?;
-      self.wait_busy()?;
+      self.wait_until_idle()?;
 
       self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
       self.send_command(WRITE_RAM)?;
@@ -276,9 +265,13 @@ pub mod display {
       self.spi.write(&self.pixels).unwrap();
       Ok(())
     }
-    fn wait_busy(&mut self) -> Result<(), DisplayError> {
+
+    pub fn is_busy(&mut self) -> Result<bool, DisplayError> {
+      Ok(self.busy.is_high().unwrap())
+    }
+    pub fn wait_until_idle(&mut self) -> Result<(), DisplayError> {
       self.delay(1);
-      while self.busy.is_high().unwrap() {
+      while self.is_busy()? {
         // NOTE: make sure busy pin is correctly connected!
         // println!("busy");
         DelayNs::delay_ms(&mut self.delay, 10);
@@ -346,5 +339,28 @@ pub mod display {
     pub const SET_RAM_X_ADDRESS_POSITION: u8 = 0x4e;
     pub const SET_RAM_Y_ADDRESS_POSITION: u8 = 0x4f;
     pub const NOP: u8 = 0x7f;
+  }
+}
+
+mod utils {
+  use std::{
+    thread::{sleep, spawn},
+    time::Duration,
+  };
+
+  use esp_idf_svc::sys;
+  use log::info;
+
+  pub fn spawn_heap_logger() {
+    spawn(move || loop {
+      unsafe {
+        info!(
+          "free heap: {} (min: {})",
+          sys::esp_get_free_heap_size(),
+          sys::esp_get_minimum_free_heap_size()
+        );
+      }
+      sleep(Duration::from_millis(5000));
+    });
   }
 }
