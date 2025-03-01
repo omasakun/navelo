@@ -5,6 +5,7 @@ use embedded_graphics::{
 };
 use esp_idf_hal::{
   delay::Delay,
+  i2c::{I2cConfig, I2cDriver},
   spi::{self, SpiDriver, SpiDriverConfig},
 };
 use esp_idf_hal::{gpio::AnyInputPin, prelude::*};
@@ -13,6 +14,7 @@ use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::sys;
 
 use display::{Weact154Display, HEIGHT, WIDTH};
+use sensors::Gy87;
 use utils::spawn_heap_logger;
 
 fn main() -> anyhow::Result<()> {
@@ -26,6 +28,7 @@ fn main() -> anyhow::Result<()> {
   spawn_heap_logger();
 
   // main_display()?;
+  main_gy87()?;
 
   Ok(())
 }
@@ -79,7 +82,50 @@ pub fn main_display() -> anyhow::Result<()> {
       dy = -dy;
     }
 
-    // sleep(Duration::from_millis(5000));
+    // delay.delay_ms(5000);
+  }
+}
+
+/**
+ * GY87 IMU Module (MPU6050 + HMC5883L + BMP180)
+ * MPU6050 Spec: https://www.alldatasheet.com/datasheet-pdf/view/517746/ETC1/MPU6050.html
+ * MPU6050 Register Map: https://www.alldatasheet.com/datasheet-pdf/view/1132809/TDK/MPU6050.html
+ * HMC5883L Datasheet: https://www.alldatasheet.com/datasheet-pdf/view/428790/HONEYWELL/HMC5883L.html
+ * BMP180 Datasheet: https://www.alldatasheet.com/datasheet-pdf/view/1132068/BOSCH/BMP180.html
+ */
+pub fn main_gy87() -> anyhow::Result<()> {
+  let peripherals = Peripherals::take()?;
+  let delay = Delay::new_default();
+
+  let i2c = peripherals.i2c0;
+  let sda = peripherals.pins.gpio22;
+  let scl = peripherals.pins.gpio23;
+
+  let i2c_config = I2cConfig::new().baudrate(400.kHz().into());
+  let i2c_driver = I2cDriver::new(i2c, sda, scl, &i2c_config)?;
+
+  let mut gy87 = Gy87::new(i2c_driver, delay);
+
+  gy87.init()?;
+  println!("initialized");
+
+  loop {
+    let mpu = gy87.read_mpu()?;
+    let hmc = gy87.read_hmc()?;
+    let bmp = gy87.read_bmp()?;
+
+    println!(
+      "acc: ({}, {}, {}), temp: {}, gyro: ({}, {}, {})",
+      mpu.acc_x, mpu.acc_y, mpu.acc_z, mpu.temp, mpu.gyro_x, mpu.gyro_y, mpu.gyro_z
+    );
+    println!("magnetometer: ({} Ga, {} Ga, {} Ga)", hmc.x, hmc.y, hmc.z);
+    println!(
+      "temperature: {} C, pressure: {} hPa",
+      bmp.temperature,
+      bmp.pressure / 100.0
+    );
+
+    delay.delay_ms(1000);
   }
 }
 
@@ -342,12 +388,221 @@ pub mod display {
   }
 }
 
+/**
+ * GY87 IMU Module (MPU6050 + HMC5883L + BMP180)
+ * MPU6050 Spec: https://www.alldatasheet.com/datasheet-pdf/view/517746/ETC1/MPU6050.html
+ * MPU6050 Register Map: https://www.alldatasheet.com/datasheet-pdf/view/1132809/TDK/MPU6050.html
+ * HMC5883L Datasheet: https://www.alldatasheet.com/datasheet-pdf/view/428790/HONEYWELL/HMC5883L.html
+ * BMP180 Datasheet: https://www.alldatasheet.com/datasheet-pdf/view/1132068/BOSCH/BMP180.html
+ */
+pub mod sensors {
+  use esp_idf_hal::{
+    delay::{Delay, BLOCK},
+    i2c::I2cDriver,
+  };
+
+  #[derive(Debug, Clone, Copy)]
+  struct Bmp180Calibration {
+    ac1: i64,
+    ac2: i64,
+    ac3: i64,
+    ac4: i64,
+    ac5: i64,
+    ac6: i64,
+    b1: i64,
+    b2: i64,
+    mc: i64,
+    md: i64,
+  }
+
+  #[derive(Debug, Clone, Copy)]
+  pub struct MpuValues {
+    pub acc_x: f32,
+    pub acc_y: f32,
+    pub acc_z: f32,
+    pub temp: f32,
+    pub gyro_x: f32,
+    pub gyro_y: f32,
+    pub gyro_z: f32,
+  }
+
+  #[derive(Debug, Clone, Copy)]
+  pub struct HmcValues {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+  }
+
+  #[derive(Debug, Clone, Copy)]
+  pub struct BmpValues {
+    pub temperature: f32,
+    pub pressure: f32,
+  }
+
+  pub struct Gy87<'a> {
+    i2c: I2cDriver<'a>,
+    delay: Delay,
+    mpu_addr: u8,
+    hmc_addr: u8,
+    bmp_addr: u8,
+    initialized: bool,
+    hmc_gain: Option<f32>,
+    bmp_calib: Option<Bmp180Calibration>,
+  }
+
+  impl<'a> Gy87<'a> {
+    pub fn new(i2c: I2cDriver<'a>, delay: Delay) -> Self {
+      Self {
+        i2c,
+        delay,
+        mpu_addr: 0x68,
+        hmc_addr: 0x1e,
+        bmp_addr: 0x77,
+        initialized: false,
+        hmc_gain: None,
+        bmp_calib: None,
+      }
+    }
+
+    pub fn init(&mut self) -> anyhow::Result<()> {
+      if self.initialized {
+        return Ok(());
+      }
+
+      // === MPU6050 === //
+      self.write(self.mpu_addr, &[0x6b, 0b0000_0001])?; // wake up and set clock source
+      self.write(self.mpu_addr, &[0x1a, 0b0000_0101])?; // 10 Hz low pass filter
+      self.write(self.mpu_addr, &[0x37, 0b0000_0010])?; // enable i2c bypass
+
+      // === HMC5883L === //
+      self.write(self.hmc_addr, &[0x00, 0b1111_0000])?; // 8 samples average, 15 Hz
+      self.write(self.hmc_addr, &[0x01, 0b0010_0000])?; // range 1.3 Ga
+      self.write(self.hmc_addr, &[0x02, 0b0000_0000])?; // continuous mode
+      self.hmc_gain = Some(1.0 / 1090.0); // for 1.3 Ga
+
+      // === BMP180 === //
+      self.write(self.bmp_addr, &[0xaa])?;
+      let calib = self.read::<[u8; 22]>(self.bmp_addr, 0xaa)?;
+      self.bmp_calib = Some(Bmp180Calibration {
+        ac1: i16::from_be_bytes([calib[0], calib[1]]) as i64,
+        ac2: i16::from_be_bytes([calib[2], calib[3]]) as i64,
+        ac3: i16::from_be_bytes([calib[4], calib[5]]) as i64,
+        ac4: u16::from_be_bytes([calib[6], calib[7]]) as i64,
+        ac5: u16::from_be_bytes([calib[8], calib[9]]) as i64,
+        ac6: u16::from_be_bytes([calib[10], calib[11]]) as i64,
+        b1: i16::from_be_bytes([calib[12], calib[13]]) as i64,
+        b2: i16::from_be_bytes([calib[14], calib[15]]) as i64,
+        mc: i16::from_be_bytes([calib[18], calib[19]]) as i64,
+        md: i16::from_be_bytes([calib[20], calib[21]]) as i64,
+      });
+
+      self.initialized = true;
+      Ok(())
+    }
+
+    // TODO: self test
+
+    pub fn read_mpu(&mut self) -> anyhow::Result<MpuValues> {
+      self.init()?;
+
+      let reg = self.read::<[u8; 14]>(self.mpu_addr, 0x3b)?;
+
+      Ok(MpuValues {
+        acc_x: i16::from_be_bytes([reg[0], reg[1]]) as f32 / 16384.0,
+        acc_y: i16::from_be_bytes([reg[2], reg[3]]) as f32 / 16384.0,
+        acc_z: i16::from_be_bytes([reg[4], reg[5]]) as f32 / 16384.0,
+        temp: i16::from_be_bytes([reg[6], reg[7]]) as f32 / 340.0 + 36.53,
+        gyro_x: i16::from_be_bytes([reg[8], reg[9]]) as f32 / 131.0,
+        gyro_y: i16::from_be_bytes([reg[10], reg[11]]) as f32 / 131.0,
+        gyro_z: i16::from_be_bytes([reg[12], reg[13]]) as f32 / 131.0,
+      })
+    }
+    pub fn read_hmc(&mut self) -> anyhow::Result<HmcValues> {
+      self.init()?;
+
+      let reg = self.read::<[u8; 6]>(self.hmc_addr, 0x03)?;
+
+      Ok(HmcValues {
+        x: i16::from_be_bytes([reg[0], reg[1]]) as f32 * self.hmc_gain.unwrap(),
+        y: i16::from_be_bytes([reg[2], reg[3]]) as f32 * self.hmc_gain.unwrap(),
+        z: i16::from_be_bytes([reg[4], reg[5]]) as f32 * self.hmc_gain.unwrap(),
+      })
+    }
+    pub fn read_bmp(&mut self) -> anyhow::Result<BmpValues> {
+      let oss = 3; // 8 samples, 26 ms
+      let sleep = [5, 8, 14, 26][oss as usize];
+
+      self.init()?;
+
+      self.write(self.bmp_addr, &[0xf4, 0x2e])?;
+      self.delay.delay_ms(5); // at least 4.5 ms
+      let ut = self.read::<[u8; 2]>(self.bmp_addr, 0xf6)?;
+      let ut = u16::from_be_bytes([ut[0], ut[1]]) as i64;
+
+      self.write(self.bmp_addr, &[0xf4, 0x34 + (oss << 6)])?;
+      self.delay.delay_ms(sleep);
+      let up = self.read::<[u8; 3]>(self.bmp_addr, 0xf6)?;
+      let up = u32::from_be_bytes([0, up[0], up[1], up[2]]) as i64;
+      let up = up >> (8 - oss);
+
+      let Bmp180Calibration {
+        ac1,
+        ac2,
+        ac3,
+        ac4,
+        ac5,
+        ac6,
+        b1,
+        b2,
+        mc,
+        md,
+      } = self.bmp_calib.unwrap();
+
+      let x1 = ((ut - ac6) * ac5) >> 15;
+      let x2 = (mc << 11) / (x1 + md);
+      let b5 = x1 + x2;
+      let temperature = (b5 + 8) as f32 / 160.0;
+
+      let b6 = b5 - 4000;
+      let x1 = (b2 * ((b6 * b6) >> 12)) >> 11;
+      let x2 = (ac2 * b6) >> 11;
+      let x3 = x1 + x2;
+      let b3 = (((ac1 * 4 + x3) << oss) + 2) / 4;
+      let x1 = (ac3 * b6) >> 13;
+      let x2 = (b1 * ((b6 * b6) >> 12)) >> 16;
+      let x3 = ((x1 + x2) + 2) >> 2;
+      let b4 = (ac4 * (x3 + 32768)) >> 15;
+      let b7 = (up - b3) * (50000 >> oss);
+      let p = b7 * 2 / b4;
+      let x1 = (p >> 8) * (p >> 8);
+      let x1 = (x1 * 3038) >> 16;
+      let x2 = (-7357 * p) >> 16;
+      let pressure = p + ((x1 + x2 + 3791) >> 4);
+      let pressure = pressure as f32;
+
+      Ok(BmpValues { temperature, pressure })
+    }
+
+    fn read<T: Default + AsMut<[u8]>>(&mut self, addr: u8, reg: u8) -> anyhow::Result<T> {
+      let mut data = T::default();
+      self.i2c.write(addr, &[reg], BLOCK)?;
+      self.i2c.read(addr, data.as_mut(), BLOCK)?;
+      Ok(data)
+    }
+    fn write(&mut self, addr: u8, data: &[u8]) -> anyhow::Result<()> {
+      self.i2c.write(addr, data, BLOCK)?;
+      Ok(())
+    }
+  }
+}
+
 mod utils {
   use std::{
     thread::{sleep, spawn},
     time::Duration,
   };
 
+  use esp_idf_hal::{delay::BLOCK, i2c::I2cDriver};
   use esp_idf_svc::sys;
   use log::info;
 
@@ -362,5 +617,13 @@ mod utils {
       }
       sleep(Duration::from_millis(5000));
     });
+  }
+
+  pub fn scan_i2c(i2c: &mut I2cDriver) {
+    for addr in 0x00..=0x7f {
+      if i2c.write(addr, &[], BLOCK).is_ok() {
+        println!("found device at 0x{:02x}", addr);
+      }
+    }
   }
 }
