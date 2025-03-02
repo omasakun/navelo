@@ -48,7 +48,9 @@ import kotlinx.coroutines.withContext
 import java.nio.charset.Charset
 
 @Composable
-fun LicenseScreen(navController: NavController) {
+fun LicenseScreen(){
+  val navController = LocalNavController.current
+
   Scaffold(
     topBar = {
       TopAppBar(

@@ -39,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -55,7 +56,9 @@ import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
 
 @Composable
-fun NavigationScreen(navController: NavController) {
+fun NavigationScreen() {
+  val navController = LocalNavController.current
+
   var isPaused by remember { mutableStateOf(false) }
   var showExitDialog by remember { mutableStateOf(false) }
   var showMenu by remember { mutableStateOf(false) }

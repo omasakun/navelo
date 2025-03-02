@@ -37,7 +37,9 @@ import me.zhanghai.compose.preference.switchPreference
 import me.zhanghai.compose.preference.textFieldPreference
 
 @Composable
-fun SettingsScreen(navController: NavController) {
+fun SettingsScreen() {
+  val navController = LocalNavController.current
+
   Scaffold(
     topBar = {
       TopAppBar(

@@ -2,6 +2,7 @@
 
 package net.o137.navelo
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -52,8 +54,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,12 +77,13 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.offset
+import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
-import androidx.navigation.NavController
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Bluetooth
 import com.composables.icons.lucide.Bookmark
@@ -90,8 +96,12 @@ import com.composables.icons.lucide.MapPin
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
+import com.mapbox.api.directions.v5.DirectionsCriteria
+import com.mapbox.api.directions.v5.models.RouteOptions
+import com.mapbox.common.location.LocationError
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraState
+import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.MapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
@@ -101,19 +111,41 @@ import com.mapbox.maps.extension.compose.annotation.rememberIconImage
 import com.mapbox.maps.extension.compose.style.MapStyle
 import com.mapbox.maps.extension.style.layers.properties.generated.IconAnchor
 import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.LocationConsumer
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.viewport.ViewportStatus
 import com.mapbox.maps.plugin.viewport.data.DefaultViewportTransitionOptions
 import com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateOptions
+import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
+import com.mapbox.navigation.base.route.NavigationRoute
+import com.mapbox.navigation.base.route.NavigationRouterCallback
+import com.mapbox.navigation.base.route.RouterFailure
+import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
+import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
+import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
+import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
+import java.text.DecimalFormat
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+
+// TODO: god object
+private data class GodData(
+  val routes: MutableState<List<NavigationRoute>?>,
+  val currentPoint: MutableState<Point?>,
+  val selectedPoint: MutableState<Point?>,
+)
+
+private val LocalGodData = compositionLocalOf<GodData> {
+  error("No GodData provided")
+}
 
 @Composable
-fun MainScreen(navController: NavController) {
+fun MainScreen() {
   val fullMapState = rememberFullMapState()
-  val currentPoint = rememberSaveable { mutableStateOf<Point?>(null) }
 
   val snackbarHostState = remember { SnackbarHostState() }
   val searchExpanded = rememberSaveable { mutableStateOf(false) }
@@ -121,34 +153,44 @@ fun MainScreen(navController: NavController) {
   val showPairingDialog = rememberSaveable { mutableStateOf(false) }
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
+  val godData = remember {
+    GodData(
+      routes = mutableStateOf(null),
+      currentPoint = mutableStateOf(null),
+      selectedPoint = mutableStateOf(null),
+    )
+  }
+
   HandleSearchReset(searchExpanded, searchQuery)
   RequestLocationPermission(fullMapState)
 
-  Scaffold(
-    snackbarHost = { SnackbarHost(snackbarHostState) },
-    modifier = Modifier.fillMaxSize(),
-    floatingActionButton = {
-      if (!fullMapState.isFollowingPuck() || !fullMapState.isPermissionReady()) {
-        FloatingActionButton(
-          shape = CircleShape,
-          onClick = {
-            if (fullMapState.isPermissionReady()) {
-              fullMapState.transitionToFollowPuckState()
-            } else {
-              fullMapState.requestLocationPermission()
-            }
-          },
-        ) {
-          Icon(Lucide.Locate, "Current location")
+  CompositionLocalProvider(LocalGodData provides godData) {
+    Scaffold(
+      snackbarHost = { SnackbarHost(snackbarHostState) },
+      modifier = Modifier.fillMaxSize(),
+      floatingActionButton = {
+        if (!fullMapState.isFollowingPuck() || !fullMapState.isPermissionReady()) {
+          FloatingActionButton(
+            shape = CircleShape,
+            onClick = {
+              if (fullMapState.isPermissionReady()) {
+                fullMapState.transitionToFollowPuckState()
+              } else {
+                fullMapState.requestLocationPermission()
+              }
+            },
+          ) {
+            Icon(Lucide.Locate, "Current location")
+          }
         }
-      }
-    },
-    bottomBar = { BottomNavigationBar(navController, showPairingDialog, showBookmarks) },
-  ) { innerPadding ->
-    MainContent(innerPadding, fullMapState, currentPoint)
-    SearchComponent(searchExpanded, searchQuery, snackbarHostState)
-    BookmarksSheet(showBookmarks)
-    PairingDialog(showPairingDialog)
+      },
+      bottomBar = { BottomNavigationBar(showPairingDialog, showBookmarks) },
+    ) { innerPadding ->
+      MainContent(innerPadding, fullMapState)
+      SearchComponent(searchExpanded, searchQuery, snackbarHostState)
+      BookmarksSheet(showBookmarks)
+      PairingDialog(showPairingDialog)
+    }
   }
 }
 
@@ -165,22 +207,71 @@ private fun HandleSearchReset(
   }
 }
 
+fun Duration.formatHourMin(): String {
+  val totalMinutes = this.inWholeMinutes
+  val hours = totalMinutes / 60
+  val minutes = totalMinutes % 60
+  return when {
+    hours > 0 && minutes > 0 -> "$hours h $minutes min"
+    hours > 0 -> "$hours h"
+    else -> "$minutes min"
+  }
+}
+
+
+data class Distance(val meters: Double)
+
+val Double.meters: Distance get() = Distance(this)
+
+fun Distance.format(): String {
+  return if (this.meters >= 1000) {
+    DecimalFormat("#.##").format(this.meters / 1000) + " km"
+  } else {
+    DecimalFormat("#").format(this.meters) + " m"
+  }
+}
+
 @Composable
 private fun BottomNavigationBar(
-  navController: NavController,
   showPairingDialog: MutableState<Boolean>,
   showBookmarks: MutableState<Boolean>
 ) {
+  val navController = LocalNavController.current
+  val godData = LocalGodData.current
+  val routes by godData.routes
+
   BottomAppBar(
     actions = {
       val menuExpanded = remember { mutableStateOf(false) }
       IconButton(onClick = { menuExpanded.value = true }) {
         Icon(Lucide.EllipsisVertical, contentDescription = "More actions")
       }
-      NavigationMenu(navController, menuExpanded, showPairingDialog)
+      NavigationMenu(menuExpanded, showPairingDialog)
       IconButton(onClick = { showBookmarks.value = true }) {
         Icon(Lucide.Bookmark, contentDescription = "Show bookmarks")
       }
+      Spacer(modifier = Modifier.weight(1f))
+      Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+      ) {
+        val directionsRoute = routes?.firstOrNull()?.directionsRoute
+        val distance = directionsRoute?.distance()?.meters
+        val duration = directionsRoute?.duration()?.seconds
+
+        Text(
+          text = duration?.formatHourMin() ?: "",
+          fontSize = 24.sp,
+          fontWeight = FontWeight.Bold
+        )
+        Text(
+          text = distance?.format() ?: "",
+          fontSize = 16.sp,
+          fontWeight = FontWeight.Normal,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
+      Spacer(modifier = Modifier.weight(1f))
+      Spacer(modifier = Modifier.width(32.dp))
     },
     floatingActionButton = {
       FloatingActionButton(
@@ -198,10 +289,11 @@ private fun BottomNavigationBar(
 
 @Composable
 private fun NavigationMenu(
-  navController: NavController,
   menuExpanded: MutableState<Boolean>,
   showPairingDialog: MutableState<Boolean>
 ) {
+  val navController = LocalNavController.current
+
   DropdownMenu(
     offset = DpOffset(0.dp, (-30).dp),
     expanded = menuExpanded.value,
@@ -612,8 +704,53 @@ sealed class PairingState : Parcelable {
 private fun MainContent(
   innerPadding: PaddingValues,
   fullMapState: FullMapState,
-  currentPoint: MutableState<Point?>
 ) {
+  val context = LocalContext.current
+  val navigationGod = LocalNavigationGod.current
+  val godData = LocalGodData.current
+  var currentRoutes by godData.routes
+  var currentPoint by godData.currentPoint
+  var selectedPoint by godData.selectedPoint
+
+  var theMapView by remember { mutableStateOf<MapView?>(null) }
+  val routeLineApi = remember {
+    MapboxRouteLineApi(MapboxRouteLineApiOptions.Builder().build())
+  }
+  val routeLineView = remember {
+    MapboxRouteLineView(
+      // road-label layer seems to be below the point annotation and location puck
+      // https://github.com/rnmapbox/maps/issues/806
+      MapboxRouteLineViewOptions.Builder(context)
+        .routeLineBelowLayerId("road-label")
+        .build()
+    )
+  }
+
+  // TODO: is this correct?
+  DisposableEffect(Unit) {
+    onDispose {
+      routeLineApi.cancel()
+      routeLineView.cancel()
+    }
+  }
+
+  LaunchedEffect(currentRoutes) {
+    val routes = currentRoutes
+    if (routes != null) {
+      routeLineApi.setNavigationRoutes(routes) { data ->
+        theMapView?.mapboxMap?.style?.let { style ->
+          routeLineView.renderRouteDrawData(style, data)
+        }
+      }
+    } else {
+      routeLineApi.clearRouteLine { data ->
+        theMapView?.mapboxMap?.style?.let { style ->
+          routeLineView.renderClearRouteLineValue(style, data)
+        }
+      }
+    }
+  }
+
   MapboxMap(
     // TODO: correct way to achieve edge-to-edge?
     modifier = Modifier
@@ -632,20 +769,51 @@ private fun MainContent(
     style = { MapStyle(Style.MAPBOX_STREETS) },
     mapViewportState = fullMapState.mapViewportState,
     onMapClickListener = {
-      if (currentPoint.value == null) {
+      if (selectedPoint == null) {
         false
       } else {
-        currentPoint.value = null
+        selectedPoint = null
+        currentRoutes = null
         true
       }
     },
     onMapLongClickListener = { point ->
-      currentPoint.value = point
+      val startPoint = currentPoint
+      if (startPoint != null) {
+        currentRoutes = null
+        navigationGod.mapboxNavigation.requestRoutes(
+          RouteOptions.builder().applyDefaultNavigationOptions(DirectionsCriteria.PROFILE_CYCLING)
+//            .alleyBias()
+//            .enableRefresh()
+//            .steps()
+            .coordinatesList(listOf(startPoint, point))
+            .build(),
+          object : NavigationRouterCallback {
+            override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
+              Log.d("MainScreen", "Router: onCanceled")
+            }
+
+            override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
+              Log.d("MainScreen", "Router: onFailure")
+            }
+
+            override fun onRoutesReady(routes: List<NavigationRoute>, routerOrigin: String) {
+              currentRoutes = routes
+              Log.d("MainScreen", "Router: onRoutesReady ${routes.size}")
+            }
+          }
+        )
+      }
+
+      selectedPoint = point
       true
     }
   ) {
     var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
+
     MapEffect(Unit) { mapView ->
+      Log.d("MainScreen", "MapEffect")
+      theMapView = mapView
       mapView.location.updateSettings {
         enabled = true
         locationPuck = createDefault2DPuck(withBearing = true)
@@ -653,6 +821,22 @@ private fun MainContent(
         puckBearing = PuckBearing.HEADING
         showAccuracyRing = true
       }
+
+      // TODO: is this good?
+      mapView.location.getLocationProvider()?.registerLocationConsumer(object : LocationConsumer {
+        override fun onBearingUpdated(vararg bearing: Double, options: (ValueAnimator.() -> Unit)?) {}
+        override fun onError(error: LocationError) {}
+        override fun onHorizontalAccuracyRadiusUpdated(vararg radius: Double, options: (ValueAnimator.() -> Unit)?) {}
+        override fun onLocationUpdated(vararg location: Point, options: (ValueAnimator.() -> Unit)?) {
+          currentPoint = location.lastOrNull() ?: currentPoint
+          Log.d("MainScreen", "new location: $location")
+        }
+
+        override fun onPuckAccuracyRadiusAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
+        override fun onPuckBearingAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
+        override fun onPuckLocationAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
+      })
+//      mapView.location.setLocationProvider(navigationGod.navigationLocationProvider)
       if (isFirstLaunch) {
         fullMapState.immediatelyFollowPuckState()
         isFirstLaunch = false
@@ -663,7 +847,8 @@ private fun MainContent(
     val markerId = R.drawable.ic_red_marker
     val markerImage = rememberIconImage(markerId, painterResource(markerId))
 
-    val point = currentPoint.value
+
+    val point = selectedPoint
     if (point != null) {
       PointAnnotation(point) {
         this.iconImage = markerImage
@@ -683,7 +868,7 @@ private fun rememberFullMapState(): FullMapState {
 
 // TODO: better name
 @SuppressLint("AutoboxingStateCreation")
-private class FullMapState() {
+private class FullMapState {
   var mapViewportState = MapViewportState().apply {
     setCameraOptions {
       center(Point.fromLngLat(139.692912, 35.688985)) // Tokyo
@@ -723,8 +908,8 @@ private class FullMapState() {
     return permissionReady == true
   }
 
-  public companion object {
-    public val Saver: Saver<FullMapState, SavedState> = Saver(
+  companion object {
+    val Saver: Saver<FullMapState, SavedState> = Saver(
       save = {
         SavedState(
           it.mapViewportState.cameraState,
