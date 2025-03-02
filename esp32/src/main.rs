@@ -4,17 +4,19 @@ use embedded_graphics::{
   primitives::{Circle, PrimitiveStyle},
 };
 use esp_idf_hal::{
-  delay::Delay,
+  delay::{Delay, FreeRtos},
   i2c::{I2cConfig, I2cDriver},
+  rmt::{config::TransmitConfig, TxRmtDriver},
   spi::{self, SpiDriver, SpiDriverConfig},
 };
 use esp_idf_hal::{gpio::AnyInputPin, prelude::*};
 use esp_idf_hal::{gpio::PinDriver, spi::SpiDeviceDriver};
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::sys;
-
-use display::{Weact154Display, HEIGHT, WIDTH};
 use log::info;
+
+use audio::*;
+use display::{Weact154Display, HEIGHT, WIDTH};
 use sensors::Gy87;
 use utils::spawn_heap_logger;
 
@@ -30,7 +32,8 @@ fn main() -> anyhow::Result<()> {
 
   // main_display()?;
   // main_gy87()?;
-  bluetooth_example::main()?;
+  main_audio()?;
+  // bluetooth_example::main()?;
 
   Ok(())
 }
@@ -88,13 +91,6 @@ pub fn main_display() -> anyhow::Result<()> {
   }
 }
 
-/**
- * GY87 IMU Module (MPU6050 + HMC5883L + BMP180)
- * MPU6050 Spec: https://www.alldatasheet.com/datasheet-pdf/view/517746/ETC1/MPU6050.html
- * MPU6050 Register Map: https://www.alldatasheet.com/datasheet-pdf/view/1132809/TDK/MPU6050.html
- * HMC5883L Datasheet: https://www.alldatasheet.com/datasheet-pdf/view/428790/HONEYWELL/HMC5883L.html
- * BMP180 Datasheet: https://www.alldatasheet.com/datasheet-pdf/view/1132068/BOSCH/BMP180.html
- */
 pub fn main_gy87() -> anyhow::Result<()> {
   let peripherals = Peripherals::take()?;
   let delay = Delay::new_default();
@@ -130,9 +126,22 @@ pub fn main_gy87() -> anyhow::Result<()> {
   }
 }
 
+pub fn main_audio() -> anyhow::Result<()> {
+  let peripherals = Peripherals::take()?;
+  let speaker = peripherals.pins.gpio1;
+  let channel = peripherals.rmt.channel0;
+  let config = TransmitConfig::new();
+  let mut tx: TxRmtDriver<'static> = TxRmtDriver::new(channel, speaker, &config)?;
+
+  loop {
+    play_song_blocking(&mut tx, &ode_to_joy())?;
+    FreeRtos::delay_ms(200);
+  }
+}
+
 // Based on https://github.com/esp-rs/esp-idf-svc/blob/b42dae55ccfef7c128da0cc8cfdb451f38572a0e/examples/bt_gatt_server.rs
 // Original license: MIT License / Copyright 2019-2020 Contributors to xtensa-lx6-rt
-mod bluetooth_example {
+pub mod bluetooth_example {
   use std::sync::{Arc, Condvar, Mutex};
 
   use enumset::enum_set;
@@ -1033,6 +1042,244 @@ pub mod display {
   }
 }
 
+pub mod audio {
+  use std::{cmp, time::Duration};
+
+  use esp_idf_hal::{
+    rmt::{PinState, Pulse, PulseTicks, Symbol, TxRmtDriver},
+    units::Hertz,
+  };
+
+  #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+  pub enum Letter {
+    C,
+    Cs,
+    D,
+    Ds,
+    E,
+    F,
+    Fs,
+    G,
+    Gs,
+    A,
+    As0,
+    B,
+  }
+
+  #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+  pub struct LetterOctave(Letter, u8);
+  impl LetterOctave {
+    pub fn new(letter: Letter, octave: u8) -> Self {
+      Self(letter, octave)
+    }
+  }
+  impl From<(Letter, u8)> for LetterOctave {
+    fn from((letter, octave): (Letter, u8)) -> Self {
+      Self(letter, octave)
+    }
+  }
+  impl From<LetterOctave> for Hertz {
+    fn from(note: LetterOctave) -> Self {
+      // TODO: cache result or calculate on compile time?
+      let LetterOctave(letter, octave) = note;
+      let step = letter as u8 + 12 * (octave + 1);
+      let freq = 440.0 * 2.0_f32.powf((step as f32 - 49.0) / 12.0);
+      Hertz(freq as u32)
+    }
+  }
+
+  pub fn play_song_blocking(tx: &mut TxRmtDriver<'static>, notes: &[Note]) -> anyhow::Result<()> {
+    // insert short rest between same notes
+    let mut new_notes = Vec::<Note>::new();
+    for note in notes {
+      if let Some(prev) = new_notes.last_mut() {
+        if prev.pitch == note.pitch {
+          prev.duration -= Duration::from_millis(20);
+          new_notes.push(note!(20));
+        }
+      }
+      new_notes.push(*note);
+    }
+
+    // precalculate all notes to avoid unwanted delays
+    let ticks_hz = tx.counter_clock()?;
+    let iter = new_notes.iter().map(|note| note.iter(ticks_hz));
+    let iter = iter.collect::<Vec<NoteRmtIter>>().into_iter().flatten();
+
+    tx.start_iter_blocking(iter)?;
+    Ok(())
+  }
+
+  #[derive(Debug, Clone, Copy)]
+  pub struct Note {
+    pitch: Option<LetterOctave>,
+    duration: Duration,
+  }
+  impl Note {
+    pub fn new(pitch: impl Into<LetterOctave>, duration: Duration) -> Self {
+      Self {
+        pitch: Some(pitch.into()),
+        duration,
+      }
+    }
+    pub fn new_rest(duration: Duration) -> Self {
+      Self { pitch: None, duration }
+    }
+    pub fn play_blocking(&self, tx: &mut TxRmtDriver<'static>) -> anyhow::Result<()> {
+      let ticks_hz = tx.counter_clock()?;
+      tx.start_iter_blocking(self.iter(ticks_hz))?;
+      Ok(())
+    }
+    pub fn iter(&self, ticks_hz: Hertz) -> NoteRmtIter {
+      let duration_ms = self.duration.as_millis();
+      match self.pitch {
+        Some(pitch) => {
+          let cycles_per_second: Hertz = pitch.into();
+          let cycles = (cycles_per_second.0 as u128 * duration_ms) / 1000;
+          let ticks_per_cycle = ticks_hz.0 / cycles_per_second.0;
+          let ticks = PulseTicks::new((ticks_per_cycle / 2) as u16).unwrap();
+          // info!("{:?} -> {} ticks, {} cycles", self, ticks_per_cycle, cycles);
+          NoteRmtIter::new_tone(ticks, cycles as u32)
+        }
+        None => {
+          let total_ticks = (duration_ms * ticks_hz.0 as u128) / 1000;
+          // info!("{:?} -> {} ticks", self, total_ticks);
+          NoteRmtIter::new_rest(total_ticks as u32)
+        }
+      }
+    }
+  }
+
+  pub enum NoteRmtIter {
+    Tone { ticks: PulseTicks, cycles: u32 },
+    Rest { ticks: u32 },
+  }
+  impl NoteRmtIter {
+    pub fn new_tone(ticks: PulseTicks, cycles: u32) -> Self {
+      Self::Tone { ticks, cycles }
+    }
+    pub fn new_rest(ticks: u32) -> Self {
+      Self::Rest { ticks }
+    }
+  }
+  impl Iterator for NoteRmtIter {
+    type Item = Symbol;
+
+    fn next(&mut self) -> Option<Self::Item> {
+      match self {
+        Self::Tone { ticks, cycles } => {
+          if *cycles > 0 {
+            *cycles -= 1;
+            Some(Symbol::new(
+              Pulse::new(PinState::High, *ticks),
+              Pulse::new(PinState::Low, *ticks),
+            ))
+          } else {
+            None
+          }
+        }
+        Self::Rest { ticks } => {
+          if *ticks > 0 {
+            let t = cmp::min(*ticks, 0xff);
+            *ticks -= t;
+            Some(Symbol::new(
+              Pulse::new(PinState::Low, PulseTicks::new(t as u16 / 2).unwrap()),
+              Pulse::new(PinState::Low, PulseTicks::new(t as u16 / 2).unwrap()),
+            ))
+          } else {
+            None
+          }
+        }
+      }
+    }
+  }
+
+  macro_rules! note {
+    ($duration: expr) => {
+      Note::new_rest(::std::time::Duration::from_millis($duration))
+    };
+    ($letter: ident, $octave: expr, $duration: expr) => {
+      Note::new(
+        (Letter::$letter, $octave),
+        ::std::time::Duration::from_millis($duration),
+      )
+    };
+  }
+
+  pub fn ode_to_joy() -> [Note; 63] {
+    [
+      note!(Fs, 5, 400),
+      note!(Fs, 5, 400),
+      note!(G, 5, 400),
+      note!(A, 5, 400),
+      note!(A, 5, 400),
+      note!(G, 5, 400),
+      note!(Fs, 5, 400),
+      note!(E, 5, 400),
+      note!(D, 5, 400),
+      note!(D, 5, 400),
+      note!(E, 5, 400),
+      note!(Fs, 5, 400),
+      note!(Fs, 5, 600),
+      note!(E, 5, 200),
+      note!(E, 5, 800),
+      //
+      note!(Fs, 5, 400),
+      note!(Fs, 5, 400),
+      note!(G, 5, 400),
+      note!(A, 5, 400),
+      note!(A, 5, 400),
+      note!(G, 5, 400),
+      note!(Fs, 5, 400),
+      note!(E, 5, 400),
+      note!(D, 5, 400),
+      note!(D, 5, 400),
+      note!(E, 5, 400),
+      note!(Fs, 5, 400),
+      note!(E, 5, 600),
+      note!(D, 5, 200),
+      note!(D, 5, 800),
+      //
+      note!(E, 5, 400),
+      note!(E, 5, 400),
+      note!(Fs, 5, 400),
+      note!(D, 5, 400),
+      note!(E, 5, 400),
+      note!(Fs, 5, 200),
+      note!(G, 5, 200),
+      note!(Fs, 5, 400),
+      note!(D, 5, 400),
+      note!(E, 5, 400),
+      note!(Fs, 5, 200),
+      note!(G, 5, 200),
+      note!(Fs, 5, 400),
+      note!(E, 5, 400),
+      note!(D, 5, 400),
+      note!(E, 5, 400),
+      note!(A, 4, 800),
+      //
+      note!(Fs, 5, 400),
+      note!(Fs, 5, 400),
+      note!(G, 5, 400),
+      note!(A, 5, 400),
+      note!(A, 5, 400),
+      note!(G, 5, 400),
+      note!(Fs, 5, 400),
+      note!(E, 5, 400),
+      note!(D, 5, 400),
+      note!(D, 5, 400),
+      note!(E, 5, 400),
+      note!(Fs, 5, 400),
+      note!(E, 5, 400),
+      note!(E, 5, 200),
+      note!(D, 5, 200),
+      note!(D, 5, 800),
+    ]
+  }
+
+  pub(crate) use note;
+}
+
 /**
  * GY87 IMU Module (MPU6050 + HMC5883L + BMP180)
  * MPU6050 Spec: https://www.alldatasheet.com/datasheet-pdf/view/517746/ETC1/MPU6050.html
@@ -1241,7 +1488,7 @@ pub mod sensors {
   }
 }
 
-mod utils {
+pub mod utils {
   use std::{
     thread::{sleep, spawn},
     time::Duration,
