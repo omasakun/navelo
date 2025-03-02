@@ -30,9 +30,9 @@ fn main() -> anyhow::Result<()> {
   info!("Hello, world!");
   spawn_heap_logger();
 
-  // main_display()?;
+  main_display()?;
   // main_gy87()?;
-  main_audio()?;
+  // main_audio()?;
   // bluetooth_example::main()?;
 
   Ok(())
@@ -68,14 +68,16 @@ pub fn main_display() -> anyhow::Result<()> {
   display.refresh_full()?;
 
   loop {
+    display.send_as_previous_pixels()?;
     display.clear(BinaryColor::On)?;
 
     Circle::new(Point::new(x, y), radius as u32)
       .into_styled(PrimitiveStyle::with_fill(BinaryColor::Off))
       .draw(&mut display)?;
 
-    display.refresh_partial_while_awake()?;
-    // display.refresh_partial()?;
+    // display.refresh_partial_while_awake()?;
+    display.refresh_partial()?;
+    display.deep_sleep()?;
 
     x += dx;
     y += dy;
@@ -87,7 +89,7 @@ pub fn main_display() -> anyhow::Result<()> {
       dy = -dy;
     }
 
-    // delay.delay_ms(5000);
+    delay.delay_ms(5000);
   }
 }
 
@@ -886,6 +888,19 @@ pub mod display {
       self.state = DisplayState::Active;
       Ok(())
     }
+    /**
+     Send the current pixels as the previous pixels.
+     Required for partial refresh after deep dleep.
+    */
+    pub fn send_as_previous_pixels(&mut self) -> Result<(), DisplayError> {
+      self.init()?;
+      self.wait_until_idle()?;
+
+      self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
+      self.send_command(WRITE_RAM_RED)?;
+      self.send_pixels_data()?;
+      Ok(())
+    }
 
     fn init(&mut self) -> Result<(), DisplayError> {
       if self.state == DisplayState::DeepSleep {
@@ -906,7 +921,7 @@ pub mod display {
         // self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
 
         self.send_command(BORDER_WAVEFORM_CONTROL)?;
-        self.send_data(&[0x01])?; // white border (black: LSB=0)
+        self.send_data(&[0x03])?; // white border (black: LSB=0)
 
         self.send_command(TEMPERATURE_SENSOR_SELECTION)?;
         self.send_data(&[0x80])?; // internal temperature sensor
@@ -922,6 +937,12 @@ pub mod display {
       self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
       self.send_command(WRITE_RAM)?;
       self.send_pixels_data()?;
+
+      // self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
+      // self.send_command(WRITE_RAM2)?;
+      // self.send_prev_pixels_data()?;
+
+      // self.pixels_prev.copy_from_slice(&self.pixels);
 
       self.send_command(DISPLAY_UPDATE_CONTROL_1)?;
       self.send_data(&[0x00])?; // display ram content
@@ -978,11 +999,6 @@ pub mod display {
       }
       Ok(())
     }
-
-    pub fn clear(&mut self, color: BinaryColor) -> Result<(), DisplayError> {
-      self.pixels.fill(u8::from(color.is_on()) * 0xff);
-      Ok(())
-    }
   }
 
   impl<SPI, DC, RST, BSY, DLY> DrawTarget for Weact154Display<SPI, DC, RST, BSY, DLY>
@@ -1015,6 +1031,11 @@ pub mod display {
       }
       Ok(())
     }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+      self.pixels.fill(u8::from(color.is_on()) * 0xff);
+      Ok(())
+    }
   }
 
   impl<SPI, DC, RST, BSY, DLY> OriginDimensions for Weact154Display<SPI, DC, RST, BSY, DLY> {
@@ -1033,6 +1054,7 @@ pub mod display {
     pub const DISPLAY_UPDATE_CONTROL_1: u8 = 0x21;
     pub const DISPLAY_UPDATE_CONTROL_2: u8 = 0x22;
     pub const WRITE_RAM: u8 = 0x24;
+    pub const WRITE_RAM_RED: u8 = 0x26; // this ram seems to be used for partial refresh
     pub const BORDER_WAVEFORM_CONTROL: u8 = 0x3c;
     pub const SET_RAM_X_ADDRESS_START_END_POSITION: u8 = 0x44;
     pub const SET_RAM_Y_ADDRESS_START_END_POSITION: u8 = 0x45;
