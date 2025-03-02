@@ -10,7 +10,9 @@ rustflags = ["--cfg", "espidf_time64"]
 [target.riscv32imac-esp-espidf]
 linker = "ldproxy"
 runner = "espflash.exe flash --monitor"
-rustflags = ["--cfg", "espidf_time64"]
+
+# https://github.com/esp-rs/esp-idf-sys/issues/275
+rustflags = ["--cfg", "espidf_time64", "--codegen", "force-unwind-tables=yes"]
 
 [unstable]
 build-std = ["std", "panic_abort"]

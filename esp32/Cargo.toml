@@ -3,7 +3,7 @@ name = "navelo"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
-rust-version = "1.77"
+rust-version = "1.84"
 
 [[bin]]
 name = "navelo"
@@ -25,8 +25,9 @@ experimental = ["esp-idf-svc/experimental"]
 anyhow = "1.0.96"
 embedded-graphics = "0.8.1"
 embedded-hal = "1.0.0"
+enumset = "1.1.5"
 esp-idf-hal = { version = "0.45.2", features = ["rmt-legacy"] }
-esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
+esp-idf-svc = { git = "https://github.com/omasakun/navelo-esp-idf-svc.git", branch = "navelo", features = ["critical-section", "embassy-time-driver", "embassy-sync", "experimental"] }
 log = "0.4"
 thiserror = "2.0.11"
 
