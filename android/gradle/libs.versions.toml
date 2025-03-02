@@ -14,6 +14,7 @@ kotlinxSerializationJson = "1.7.3"
 lifecycleRuntimeKtx = "2.8.7"
 mapbox = "11.10.0"
 mapboxNav = "3.7.0"
+mapboxSearch = "2.8.0-rc.1"
 material = "1.12.0"
 navigationCompose = "2.8.7"
 ossLicensesPlugin = "0.10.6"
@@ -42,6 +43,8 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 mapbox-android = { module = "com.mapbox.navigationcore:android", version.ref = "mapboxNav" }
 mapbox-compose = { module = "com.mapbox.extension:maps-compose", version.ref = "mapbox" }
 mapbox-navigation = { module = "com.mapbox.navigationcore:navigation", version.ref = "mapboxNav" }
+mapbox-search-base = { module = "com.mapbox.search:base", version.ref = "mapboxSearch" }
+mapbox-search-place = { module = "com.mapbox.search:place-autocomplete", version.ref = "mapboxSearch" }
 mapbox-tripdata = { module = "com.mapbox.navigationcore:tripdata", version.ref = "mapboxNav" }
 mapbox-ui-components = { module = "com.mapbox.navigationcore:ui-components", version.ref = "mapboxNav" }
 mapbox-ui-maps = { module = "com.mapbox.navigationcore:ui-maps", version.ref = "mapboxNav" }

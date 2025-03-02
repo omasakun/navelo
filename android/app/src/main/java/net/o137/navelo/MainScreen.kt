@@ -125,6 +125,11 @@ import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
 import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
+import com.mapbox.search.autocomplete.PlaceAutocomplete
+import com.mapbox.search.autocomplete.PlaceAutocompleteOptions
+import com.mapbox.search.autocomplete.PlaceAutocompleteSuggestion
+import com.mapbox.search.common.IsoLanguageCode
+import com.mapbox.search.common.NavigationProfile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
@@ -134,9 +139,10 @@ import kotlin.time.Duration.Companion.seconds
 
 // TODO: god object
 private data class GodData(
-  val routes: MutableState<List<NavigationRoute>?>,
-  val currentPoint: MutableState<Point?>,
-  val selectedPoint: MutableState<Point?>,
+  val routes: MutableState<List<NavigationRoute>?> = mutableStateOf(null),
+  val currentPoint: MutableState<Point?> = mutableStateOf(null),
+  val selectedPoint: MutableState<Point?> = mutableStateOf(null),
+  val mapView: MutableState<MapView?> = mutableStateOf(null)
 )
 
 private val LocalGodData = compositionLocalOf<GodData> {
@@ -153,13 +159,7 @@ fun MainScreen() {
   val showPairingDialog = rememberSaveable { mutableStateOf(false) }
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
-  val godData = remember {
-    GodData(
-      routes = mutableStateOf(null),
-      currentPoint = mutableStateOf(null),
-      selectedPoint = mutableStateOf(null),
-    )
-  }
+  val godData = remember { GodData() }
 
   HandleSearchReset(searchExpanded, searchQuery)
   RequestLocationPermission(fullMapState)
@@ -318,11 +318,11 @@ private fun NavigationMenu(
   }
 }
 
-@Parcelize
 data class SearchResult(
   val text: String,
-  val additionalInfo: String
-) : Parcelable
+  val additionalInfo: String,
+  val detail: PlaceAutocompleteSuggestion
+)
 
 @Composable
 private fun SearchComponent(
@@ -331,25 +331,50 @@ private fun SearchComponent(
   snackbarHostState: SnackbarHostState
 ) {
   val scope = rememberCoroutineScope()
-  val searchResults = rememberSaveable {
-    mutableStateOf(
-      (0..20).map { SearchResult("Search result $it", "Additional info") }
-    )
-  }
+  var searchResults by remember { mutableStateOf<List<SearchResult>>(listOf()) }
+  val mapView by LocalGodData.current.mapView
+  var selectedPoint by LocalGodData.current.selectedPoint
+
+  val placeAutocomplete = remember { PlaceAutocomplete.create() }
+
   SearchComponentLayout(
     expanded = expanded,
     query = query,
     onQueryChange = { currentQuery ->
-      searchResults.value =
-        listOf(SearchResult("Search result $currentQuery", "Additional info")) +
-          (0..20).map { SearchResult("Search result $it", "Additional info") }
-    },
-    onSelect = {
       scope.launch {
-        snackbarHostState.showSnackbar("Selected: ${it.text}")
+        placeAutocomplete.suggestions(
+          currentQuery,
+          proximity = mapView?.mapboxMap?.cameraState?.center,
+          options = PlaceAutocompleteOptions(
+            language = IsoLanguageCode("ja"), // TODO: JA -> error on placeAutocomplete.select
+            navigationProfile = NavigationProfile.CYCLING
+          )
+        ).onValue { value ->
+          searchResults = value.map { result ->
+            SearchResult(result.name, result.distanceMeters?.meters?.format() ?: "", result)
+          }
+        }.onError {
+          // TODO: proper handling
+        }
       }
     },
-    searchResults = searchResults.value
+    onSelect = { searchResult ->
+      scope.launch {
+        placeAutocomplete.select(searchResult.detail)
+          .onValue { value ->
+            selectedPoint = value.coordinate
+            Log.d("MainScreen", "Selected: ${value.coordinate}")
+          }
+          .onError {
+            Log.d("MainScreen", "Error: $it")
+            scope.launch {
+              // TODO: proper handling
+              snackbarHostState.showSnackbar("Error: $it")
+            }
+          }
+      }
+    },
+    searchResults = searchResults
   )
 }
 
@@ -711,8 +736,8 @@ private fun MainContent(
   var currentRoutes by godData.routes
   var currentPoint by godData.currentPoint
   var selectedPoint by godData.selectedPoint
+  var theMapView by godData.mapView
 
-  var theMapView by remember { mutableStateOf<MapView?>(null) }
   val routeLineApi = remember {
     MapboxRouteLineApi(MapboxRouteLineApiOptions.Builder().build())
   }
@@ -751,6 +776,37 @@ private fun MainContent(
     }
   }
 
+  LaunchedEffect(selectedPoint) {
+    val startPoint = currentPoint
+    val endPoint = selectedPoint
+    if (startPoint != null && endPoint != null) {
+      currentRoutes = null
+      navigationGod.mapboxNavigation.requestRoutes(
+        RouteOptions.builder().applyDefaultNavigationOptions(DirectionsCriteria.PROFILE_CYCLING)
+//            .alleyBias()
+//            .enableRefresh()
+//            .steps()
+          .coordinatesList(listOf(startPoint, endPoint))
+          .build(),
+        object : NavigationRouterCallback {
+          override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
+            Log.d("MainScreen", "Router: onCanceled")
+          }
+
+          override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
+            Log.d("MainScreen", "Router: onFailure")
+          }
+
+          override fun onRoutesReady(routes: List<NavigationRoute>, routerOrigin: String) {
+            currentRoutes = routes
+            Log.d("MainScreen", "Router: onRoutesReady ${routes.size}")
+          }
+        }
+      )
+    }
+
+  }
+
   MapboxMap(
     // TODO: correct way to achieve edge-to-edge?
     modifier = Modifier
@@ -778,33 +834,6 @@ private fun MainContent(
       }
     },
     onMapLongClickListener = { point ->
-      val startPoint = currentPoint
-      if (startPoint != null) {
-        currentRoutes = null
-        navigationGod.mapboxNavigation.requestRoutes(
-          RouteOptions.builder().applyDefaultNavigationOptions(DirectionsCriteria.PROFILE_CYCLING)
-//            .alleyBias()
-//            .enableRefresh()
-//            .steps()
-            .coordinatesList(listOf(startPoint, point))
-            .build(),
-          object : NavigationRouterCallback {
-            override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
-              Log.d("MainScreen", "Router: onCanceled")
-            }
-
-            override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
-              Log.d("MainScreen", "Router: onFailure")
-            }
-
-            override fun onRoutesReady(routes: List<NavigationRoute>, routerOrigin: String) {
-              currentRoutes = routes
-              Log.d("MainScreen", "Router: onRoutesReady ${routes.size}")
-            }
-          }
-        )
-      }
-
       selectedPoint = point
       true
     }

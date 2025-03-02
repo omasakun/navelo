@@ -56,6 +56,8 @@ dependencies {
   implementation(libs.mapbox.android)
   implementation(libs.mapbox.compose)
   implementation(libs.mapbox.navigation)
+  implementation(libs.mapbox.search.base)
+  implementation(libs.mapbox.search.place)
   implementation(libs.mapbox.tripdata)
   implementation(libs.mapbox.ui.components)
   implementation(libs.mapbox.ui.maps)
