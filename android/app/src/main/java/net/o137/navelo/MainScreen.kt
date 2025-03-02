@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package net.o137.navelo
 
@@ -11,7 +11,9 @@ import android.os.Parcelable
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -45,6 +47,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
@@ -58,6 +61,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -128,6 +132,7 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import com.mapbox.search.autocomplete.PlaceAutocomplete
 import com.mapbox.search.autocomplete.PlaceAutocompleteOptions
 import com.mapbox.search.autocomplete.PlaceAutocompleteSuggestion
+import com.mapbox.search.autocomplete.PlaceAutocompleteType
 import com.mapbox.search.common.IsoLanguageCode
 import com.mapbox.search.common.NavigationProfile
 import kotlinx.coroutines.delay
@@ -142,7 +147,8 @@ private data class GodData(
   val routes: MutableState<List<NavigationRoute>?> = mutableStateOf(null),
   val currentPoint: MutableState<Point?> = mutableStateOf(null),
   val selectedPoint: MutableState<Point?> = mutableStateOf(null),
-  val mapView: MutableState<MapView?> = mutableStateOf(null)
+  val mapView: MutableState<MapView?> = mutableStateOf(null),
+  val snackbarHostState: SnackbarHostState
 )
 
 private val LocalGodData = compositionLocalOf<GodData> {
@@ -159,7 +165,7 @@ fun MainScreen() {
   val showPairingDialog = rememberSaveable { mutableStateOf(false) }
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
-  val godData = remember { GodData() }
+  val godData = remember { GodData(snackbarHostState = snackbarHostState) }
 
   HandleSearchReset(searchExpanded, searchQuery)
   RequestLocationPermission(fullMapState)
@@ -187,7 +193,7 @@ fun MainScreen() {
       bottomBar = { BottomNavigationBar(showPairingDialog, showBookmarks) },
     ) { innerPadding ->
       MainContent(innerPadding, fullMapState)
-      SearchComponent(searchExpanded, searchQuery, snackbarHostState)
+      SearchComponent(searchExpanded, searchQuery)
       BookmarksSheet(showBookmarks)
       PairingDialog(showPairingDialog)
     }
@@ -234,8 +240,9 @@ fun Distance.format(): String {
 @Composable
 private fun BottomNavigationBar(
   showPairingDialog: MutableState<Boolean>,
-  showBookmarks: MutableState<Boolean>
+  showBookmarks: MutableState<Boolean>,
 ) {
+  val scope = rememberCoroutineScope()
   val navController = LocalNavController.current
   val godData = LocalGodData.current
   val routes by godData.routes
@@ -276,7 +283,14 @@ private fun BottomNavigationBar(
     floatingActionButton = {
       FloatingActionButton(
         onClick = {
-          navController.navigate(Route.Navigation)
+          if (routes?.firstOrNull() == null) {
+            // TODO: focus search box
+            scope.launch {
+              godData.snackbarHostState.showSnackbar("Long press on the map to choose a destination")
+            }
+          } else {
+            navController.navigate(Route.Navigation)
+          }
         },
         containerColor = BottomAppBarDefaults.bottomAppBarFabColor,
         elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation()
@@ -328,12 +342,12 @@ data class SearchResult(
 private fun SearchComponent(
   expanded: MutableState<Boolean>,
   query: MutableState<String>,
-  snackbarHostState: SnackbarHostState
 ) {
   val scope = rememberCoroutineScope()
   var searchResults by remember { mutableStateOf<List<SearchResult>>(listOf()) }
   val mapView by LocalGodData.current.mapView
   var selectedPoint by LocalGodData.current.selectedPoint
+  val snackbarHostState = LocalGodData.current.snackbarHostState
 
   val placeAutocomplete = remember { PlaceAutocomplete.create() }
 
@@ -464,26 +478,122 @@ private fun SearchBarIcon(expanded: MutableState<Boolean>) {
   }
 }
 
-@Parcelize
-data class Bookmark(
-  val text: String,
-  val additionalInfo: String
-) : Parcelable
-
 @Composable
-private fun BookmarksSheet(
+fun BookmarksSheet(
   showBookmarks: MutableState<Boolean>,
 ) {
-  val bookmarks = rememberSaveable {
-    mutableStateOf(
-      (0..20).map { Bookmark("Bookmark $it", "Additional info") }
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
+  var selectedPoint by LocalGodData.current.selectedPoint
+  val snackbarHostState = LocalGodData.current.snackbarHostState
+  val placeAutocomplete = remember { PlaceAutocomplete.create() }
+
+  val bookmarksFlow = getBookmarksFlow(context.bookmarkDataStore)
+  val bookmarks by bookmarksFlow.collectAsState(initial = emptyList())
+
+  var newBookmarkPoint by remember { mutableStateOf<Point?>(null) }
+  var newBookmarkName by remember { mutableStateOf("") }
+
+  var showDeleteDialog by remember { mutableStateOf(false) }
+  var bookmarkToDelete by remember { mutableStateOf<Bookmark?>(null) }
+
+  val newPoint = newBookmarkPoint
+  if (newPoint != null) {
+    AlertDialog(
+      onDismissRequest = { newBookmarkPoint = null },
+      title = { Text("Add bookmark") },
+      text = {
+        Column {
+          Text("Enter a name for the new bookmark")
+          // TODO: auto focus on the text field
+          OutlinedTextField(
+            value = newBookmarkName,
+            onValueChange = { newBookmarkName = it },
+            label = { Text("Bookmark name") }
+          )
+        }
+      },
+      confirmButton = {
+        TextButton(onClick = {
+          scope.launch {
+            // TODO: 直接 API を呼び出して確実に住所を取得する
+            val address = placeAutocomplete.reverse(
+              newPoint, PlaceAutocompleteOptions(
+                language = IsoLanguageCode("ja"), // TODO: JA -> error on placeAutocomplete.select
+                navigationProfile = NavigationProfile.CYCLING,
+                types = listOf(PlaceAutocompleteType.AdministrativeUnit.Address)
+              )
+            ).getValueOrElse { listOf() }
+            val addressText = (address.firstOrNull()?.name ?: "Unknown")
+            val addressText2 = if (addressText.startsWith("〒")) {
+              addressText.substring(10)
+            } else {
+              addressText
+            }
+            val newBookmark = Bookmark(
+              text = newBookmarkName,
+              additionalInfo = addressText2,
+              point = newPoint
+            )
+            addBookmark(context.bookmarkDataStore, newBookmark)
+          }
+          newBookmarkPoint = null
+        }) {
+          Text("Add")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = {
+          newBookmarkPoint = null
+        }) {
+          Text("Cancel")
+        }
+      }
     )
   }
+
+  if (showDeleteDialog) {
+    AlertDialog(
+      onDismissRequest = { showDeleteDialog = false },
+      title = { Text("Remove bookmark") },
+      text = { Text("Are you sure you want to remove this bookmark?") },
+      confirmButton = {
+        TextButton(onClick = {
+          bookmarkToDelete?.let { bookmark ->
+            scope.launch { removeBookmark(context.bookmarkDataStore, bookmark) }
+          }
+          showDeleteDialog = false
+        }) {
+          Text("Delete")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showDeleteDialog = false }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+
   BookmarksSheetLayout(
     showBookmarks = showBookmarks,
-    bookmarks = bookmarks.value,
-    onSelect = { /* do something */ },
-    onAdd = { /* do something */ }
+    bookmarks = bookmarks,
+    onSelect = { bookmark ->
+      selectedPoint = bookmark.point
+    },
+    onLongPress = { bookmark ->
+      bookmarkToDelete = bookmark
+      showDeleteDialog = true
+    },
+    onAddClicked = {
+      val point = selectedPoint
+      if (point == null) {
+        scope.launch { snackbarHostState.showSnackbar("Long press on the map to choose a location") }
+      } else {
+        newBookmarkName = ""
+        newBookmarkPoint = point
+      }
+    }
   )
 }
 
@@ -492,7 +602,8 @@ private fun BookmarksSheetLayout(
   showBookmarks: MutableState<Boolean>,
   bookmarks: List<Bookmark>,
   onSelect: (Bookmark) -> Unit,
-  onAdd: () -> Unit
+  onLongPress: (Bookmark) -> Unit,
+  onAddClicked: () -> Unit
 ) {
   val bookmarksSheetState = rememberModalBottomSheetState()
 
@@ -522,7 +633,7 @@ private fun BookmarksSheetLayout(
             Text("Bookmarks", style = MaterialTheme.typography.headlineSmall)
             Button(onClick = {
               showBookmarks.value = false
-              onAdd()
+              onAddClicked()
             }) {
               Icon(
                 Lucide.Plus,
@@ -541,10 +652,15 @@ private fun BookmarksSheetLayout(
           ListItem(
             modifier = Modifier
               .fillMaxWidth()
-              .clickable {
-                showBookmarks.value = false
-                onSelect(bookmark)
-              },
+              .combinedClickable(
+                onClick = {
+                  showBookmarks.value = false
+                  onSelect(bookmark)
+                },
+                onLongClick = {
+                  onLongPress(bookmark)
+                }
+              ),
             leadingContent = { Icon(Lucide.Bookmark, contentDescription = null) },
             headlineContent = { Text(bookmark.text) },
             supportingContent = { Text(bookmark.additionalInfo) },
