@@ -1294,7 +1294,7 @@ pub mod sensors {
   };
 
   #[derive(Debug, Clone, Copy)]
-  struct Bmp180Calibration {
+  struct Bmp180CalibrationData {
     ac1: i64,
     ac2: i64,
     ac3: i64,
@@ -1339,7 +1339,7 @@ pub mod sensors {
     bmp_addr: u8,
     initialized: bool,
     hmc_gain: Option<f32>,
-    bmp_calib: Option<Bmp180Calibration>,
+    bmp_calib: Option<Bmp180CalibrationData>,
   }
 
   impl<'a> Gy87<'a> {
@@ -1375,7 +1375,7 @@ pub mod sensors {
       // === BMP180 === //
       self.write(self.bmp_addr, &[0xaa])?;
       let calib = self.read::<[u8; 22]>(self.bmp_addr, 0xaa)?;
-      self.bmp_calib = Some(Bmp180Calibration {
+      self.bmp_calib = Some(Bmp180CalibrationData {
         ac1: i16::from_be_bytes([calib[0], calib[1]]) as i64,
         ac2: i16::from_be_bytes([calib[2], calib[3]]) as i64,
         ac3: i16::from_be_bytes([calib[4], calib[5]]) as i64,
@@ -1437,7 +1437,7 @@ pub mod sensors {
       let up = u32::from_be_bytes([0, up[0], up[1], up[2]]) as i64;
       let up = up >> (8 - oss);
 
-      let Bmp180Calibration {
+      let Bmp180CalibrationData {
         ac1,
         ac2,
         ac3,
