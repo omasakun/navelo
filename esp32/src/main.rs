@@ -62,21 +62,21 @@ pub fn main_display() -> anyhow::Result<()> {
   let mut y = 50;
   let mut dx = 6;
   let mut dy = 8;
-  let radius: i32 = 20;
+  let radius: i32 = 40;
 
   display.clear(BinaryColor::On)?;
   display.refresh_full()?;
 
   loop {
     display.send_as_previous_pixels()?;
-    display.clear(BinaryColor::On)?;
 
+    display.clear(BinaryColor::On)?;
     Circle::new(Point::new(x, y), radius as u32)
       .into_styled(PrimitiveStyle::with_fill(BinaryColor::Off))
       .draw(&mut display)?;
 
-    // display.refresh_partial_while_awake()?;
-    display.refresh_partial()?;
+    display.refresh_partial_fast()?;
+    // display.refresh_partial_while_awake_fast()?;
     display.deep_sleep()?;
 
     x += dx;
@@ -856,36 +856,75 @@ pub mod display {
       self.state
     }
 
+    pub fn wake_up(&mut self) -> Result<(), DisplayError> {
+      if self.state != DisplayState::Active {
+        self.init()?;
+        self.wait_until_idle()?;
+        self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
+        self.send_data(&[0b1100_0000])?; // enable analog & clock signal
+        self.send_command(MASTER_ACTIVATION)?;
+        self.send_command(NOP)?;
+        self.state = DisplayState::Active;
+      }
+      Ok(())
+    }
     pub fn sleep(&mut self) -> Result<(), DisplayError> {
-      self.wait_until_idle()?;
-      self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
-      self.send_data(&[0b1000_0011])?; // disable analog & clock signal
-      self.send_command(MASTER_ACTIVATION)?;
-      self.send_command(NOP)?;
-      self.state = DisplayState::Sleep;
+      if self.state == DisplayState::Active {
+        self.wait_until_idle()?;
+        self.send_command(DISPLAY_UPDATE_CONTROL_2)?;
+        self.send_data(&[0b1000_0011])?; // disable analog & clock signal
+        self.send_command(MASTER_ACTIVATION)?;
+        self.send_command(NOP)?;
+        self.state = DisplayState::Sleep;
+      }
       Ok(())
     }
     pub fn deep_sleep(&mut self) -> Result<(), DisplayError> {
       self.sleep()?;
-
-      self.wait_until_idle()?;
-      self.send_command(DEEP_SLEEP_MODE)?;
-      self.send_data(&[0x01])?; // deep sleep mode 1
-      self.state = DisplayState::DeepSleep;
+      if self.state != DisplayState::DeepSleep {
+        self.wait_until_idle()?;
+        self.send_command(DEEP_SLEEP_MODE)?;
+        self.send_data(&[0x01])?; // deep sleep mode 1
+        self.state = DisplayState::DeepSleep;
+      }
       Ok(())
     }
 
     pub fn refresh_full(&mut self) -> Result<(), DisplayError> {
+      self.init()?;
+      self.wait_until_idle()?;
       self.refresh(0b1111_0111)?; // display with mode 1, then sleep
+      self.state = DisplayState::Sleep;
       Ok(())
     }
     pub fn refresh_partial(&mut self) -> Result<(), DisplayError> {
+      self.init()?;
+      self.wait_until_idle()?;
       self.refresh(0b1111_1111)?; // display with mode 2, then sleep
+      self.state = DisplayState::Sleep;
+      Ok(())
+    }
+    pub fn refresh_partial_fast(&mut self) -> Result<(), DisplayError> {
+      self.init()?;
+      self.wait_until_idle()?;
+      self.send_command(WRITE_LUT_REGISTER)?;
+      self.send_data(&FAST_LUT)?;
+      self.refresh(0b1100_0111)?; // display with current lut, then sleep
+      self.state = DisplayState::Sleep;
       Ok(())
     }
     pub fn refresh_partial_while_awake(&mut self) -> Result<(), DisplayError> {
-      self.refresh(0b1111_1100)?; // display with mode 2, without sleep
-      self.state = DisplayState::Active;
+      self.wake_up()?;
+      self.wait_until_idle()?;
+      self.refresh(0b0001_1100)?; // display with mode 2, without sleep
+      Ok(())
+    }
+    pub fn refresh_partial_while_awake_fast(&mut self) -> Result<(), DisplayError> {
+      self.wake_up()?;
+      self.wait_until_idle()?;
+      self.send_command(WRITE_LUT_REGISTER)?;
+      self.send_data(&FAST_LUT)?;
+      self.refresh(0b0000_0100)?; // display with current lut, without sleep
       Ok(())
     }
     /**
@@ -921,19 +960,28 @@ pub mod display {
         // self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
 
         self.send_command(BORDER_WAVEFORM_CONTROL)?;
-        self.send_data(&[0x03])?; // white border (black: LSB=0)
+        self.send_data(&[0x05])?; // white border (black: LSB=0)
 
         self.send_command(TEMPERATURE_SENSOR_SELECTION)?;
         self.send_data(&[0x80])?; // internal temperature sensor
+
+        // self.send_command(WRITE_VCOM_REGISTER)?;
+        // self.send_data(&[0x08])?;
+
+        // self.send_command(GATE_DRIVING_VOLTAGE_CONTROL)?;
+        // self.send_data(&[0x03])?;
+
+        // self.send_command(SOURCE_DRIVING_VOLTAGE_CONTROL)?;
+        // self.send_data(&[0x28, 0x28, 0x1E])?;
+
+        // self.send_command(BOOSTER_SOFT_START_CONTROL)?;
+        // self.send_data(&[0xF5, 0xF5, 0xF5, 0x00])?;
 
         self.state = DisplayState::Sleep;
       }
       Ok(())
     }
     fn refresh(&mut self, mode: u8) -> Result<(), DisplayError> {
-      self.init()?;
-      self.wait_until_idle()?;
-
       self.set_ram_area(0, 0, WIDTH, HEIGHT)?;
       self.send_command(WRITE_RAM)?;
       self.send_pixels_data()?;
@@ -1044,8 +1092,42 @@ pub mod display {
     }
   }
 
+  // TODO: change lut based on temperature
+  #[rustfmt::skip]
+  const FAST_LUT: [u8;153] = [
+    // VS: 00 GND, 01 VSH1 (+), 10 VSL (-), 11 VSH2 (?)
+    // LUT 0 : black -> black
+    0b00_00_00_01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // LUT 1 : black -> white
+    0b00_10_10_10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // LUT 2 : white -> black
+    0b01_01_01_01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // LUT 3 : white -> white
+    0b00_00_00_10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // LUT 4 : ????? -> ????? : unused
+    0b00_00_00_00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // TPa, TPb, SRab, TPc, TPd, SRcd, RP
+    0x01, 0x01, 0x00, 0x01, 0x01, 0x00, 0x00, // Ta + Tb + Tc + Td
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // nop
+    0x88, 0x88, 0x88, 0x88, 0x88, 0x88, // frequency
+    0x00, 0x00, 0x00, // all gate on selection: none
+  ];
+
   mod command {
     pub const DRIVER_OUTPUT_CONTROL: u8 = 0x01;
+    pub const GATE_DRIVING_VOLTAGE_CONTROL: u8 = 0x03;
+    pub const SOURCE_DRIVING_VOLTAGE_CONTROL: u8 = 0x04;
+    pub const BOOSTER_SOFT_START_CONTROL: u8 = 0x0c;
     pub const DEEP_SLEEP_MODE: u8 = 0x10;
     pub const DATA_ENTRY_MODE_SETTING: u8 = 0x11;
     pub const SW_RESET: u8 = 0x12;
@@ -1055,6 +1137,8 @@ pub mod display {
     pub const DISPLAY_UPDATE_CONTROL_2: u8 = 0x22;
     pub const WRITE_RAM: u8 = 0x24;
     pub const WRITE_RAM_RED: u8 = 0x26; // this ram seems to be used for partial refresh
+    pub const WRITE_VCOM_REGISTER: u8 = 0x2c;
+    pub const WRITE_LUT_REGISTER: u8 = 0x32;
     pub const BORDER_WAVEFORM_CONTROL: u8 = 0x3c;
     pub const SET_RAM_X_ADDRESS_START_END_POSITION: u8 = 0x44;
     pub const SET_RAM_Y_ADDRESS_START_END_POSITION: u8 = 0x45;

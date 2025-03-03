@@ -20,3 +20,6 @@
 - esp-espidf が tier 3 サポートになったらしいので、設定が簡単になったかも
   - https://docs.esp-rs.org/book/installation/riscv.html
   - espflash だけ入れればいいってこと？
+- https://github.com/esp-rs/esp-flasher-stub/issues/45#issuecomment-2278912176
+- esp-idf-svc を公式クレートにする
+  - バグ解決後 : https://github.com/esp-rs/esp-idf-svc/issues/556
