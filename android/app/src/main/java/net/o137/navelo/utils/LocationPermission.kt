@@ -1,5 +1,6 @@
 package net.o137.navelo.utils
 
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -23,7 +24,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import kotlinx.parcelize.Parcelize
-import net.o137.navelo.MainActivity
 
 private const val TAG = "LocationPermission"
 
@@ -41,13 +41,15 @@ fun rememberLocationPermissionState(): LocationPermissionState {
 
 class LocationPermissionState {
   internal var count by mutableIntStateOf(0)
-  internal var isGranted by mutableStateOf<Boolean?>(null)
+  var isGranted by mutableStateOf<Boolean?>(null)
+    internal set
 
   fun requestLocationPermission() {
     count++
     Log.d(TAG, "RequestLocationPermission $count")
   }
 
+  // TODO: duplicated accessor?
   fun isPermissionReady(): Boolean {
     return isGranted == true
   }
@@ -89,7 +91,7 @@ fun RequestLocationPermission(state: LocationPermissionState, askImmediately: Bo
 
     if (!isGranted && (askImmediately || state.count > 0)) {
       val permanentlyDenied = locationPermissions.any {
-        !ActivityCompat.shouldShowRequestPermissionRationale(context as MainActivity, it)
+        !ActivityCompat.shouldShowRequestPermissionRationale(context as Activity, it)
       }
       if (permanentlyDenied) {
         showAlertDialog.value = true

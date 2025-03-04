@@ -66,15 +66,26 @@ import com.mapbox.maps.extension.compose.DisposableMapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.style.MapStyle
 import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.navigation.core.trip.session.RouteProgressObserver
+import com.mapbox.navigation.core.trip.session.TripSessionState
 import net.o137.navelo.utils.FullMapState
+import net.o137.navelo.utils.ListenIndicatorPositionChange
 import net.o137.navelo.utils.LocationPermissionState
+import net.o137.navelo.utils.MapboxRouteArrow
 import net.o137.navelo.utils.MapboxRouteLine
+import net.o137.navelo.utils.ObserveRouteProgress
 import net.o137.navelo.utils.RequestLocationPermission
-import net.o137.navelo.utils.enhancedLocationProvider
+import net.o137.navelo.utils.format
+import net.o137.navelo.utils.formatHourMin
+import net.o137.navelo.utils.meters
 import net.o137.navelo.utils.rememberFullMapState
 import net.o137.navelo.utils.rememberLocationPermissionState
+import net.o137.navelo.utils.useEnhancedLocationProvider
+import net.o137.navelo.utils.useRouteProgress
+import kotlin.time.Duration.Companion.seconds
 
 
 private const val TAG = "NavigationScreen"
@@ -195,13 +206,18 @@ fun NavigationScreen() {
             Spacer(modifier = Modifier.weight(1f))
             if (isPaused) Spacer(modifier = Modifier.width(24.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
+              val routeProgress = useRouteProgress(mapboxNavigation)
+              val distance = routeProgress?.distanceRemaining?.meters
+              val duration = routeProgress?.durationRemaining?.seconds
+
               Text(
-                text = "15:00",
+                text = distance?.format() ?: "",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
               )
               Text(
-                text = "5.0 km",
+                text = duration?.formatHourMin() ?: "",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -281,21 +297,62 @@ private fun MainContent(
 ) {
   val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
   val navigationRoutes by LocalActivityGod.current.navigationRoutes
-  val enhancedLocationProvider = enhancedLocationProvider(mapboxNavigation)
+  val enhancedLocationProvider = useEnhancedLocationProvider(mapboxNavigation)
   var theMapView by LocalNavigationScreenGod.current.mapView
   val locationPermissionState = LocalNavigationScreenGod.current.locationPermissionState
+  val isPermissionGranted = locationPermissionState.isGranted == true
 
-  DisposableEffect(Unit) {
+  DisposableEffect(isPermissionGranted) {
+    val routes = navigationRoutes
     @SuppressLint("MissingPermission")
-    if (locationPermissionState.isPermissionReady()) {
+    if (isPermissionGranted && routes != null) {
+      Log.d(TAG, "startTripSession")
+      mapboxNavigation.setNavigationRoutes(routes)
       mapboxNavigation.startTripSession(false)
+    } else {
+      Log.d(TAG, "startTripSession was skipped: permission=$isPermissionGranted, routes=$routes")
     }
     onDispose {
-      mapboxNavigation.stopTripSession()
+      Log.d(TAG, "stopTripSession")
+      if (mapboxNavigation.getTripSessionState() == TripSessionState.STARTED) {
+        mapboxNavigation.stopTripSession()
+      }
     }
   }
 
-  MapboxRouteLine(theMapView?.mapboxMap, navigationRoutes)
+  val mapboxMap = theMapView?.mapboxMap
+  if (mapboxMap != null) {
+    MapboxRouteArrow(mapboxMap, mapboxNavigation)
+    MapboxRouteLine(
+      mapboxMap,
+      navigationRoutes,
+      apiOptions = {
+        vanishingRouteLineEnabled(true)
+        styleInactiveRouteLegsIndependently(true)
+      },
+      viewOptions = {
+        displayRestrictedRoadSections(true)
+      }
+    ) { api, view ->
+      ObserveRouteProgress(mapboxNavigation, remember {
+        RouteProgressObserver {
+          api.updateWithRouteProgress(it) { data ->
+            theMapView?.mapboxMap?.style?.let { style ->
+              view.renderRouteLineUpdate(style, data)
+            }
+          }
+        }
+      })
+      ListenIndicatorPositionChange(theMapView?.location, remember {
+        OnIndicatorPositionChangedListener {
+          val data = api.updateTraveledRouteLine(it)
+          theMapView?.mapboxMap?.style?.let { style ->
+            view.renderRouteLineUpdate(style, data)
+          }
+        }
+      })
+    }
+  }
 
   MapboxMap(
     // TODO: correct way to achieve edge-to-edge?
@@ -307,7 +364,7 @@ private fun MainContent(
     style = { MapStyle(Style.MAPBOX_STREETS) },
     mapViewportState = fullMapState.mapViewportState,
   ) {
-    var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
+    var isFirstLaunch by remember { mutableStateOf(true) }
 
     DisposableMapEffect(Unit) { mapView ->
       Log.d(TAG, "MapEffect")

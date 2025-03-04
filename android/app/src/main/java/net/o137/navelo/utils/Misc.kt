@@ -48,6 +48,7 @@ fun Duration.formatHourMin(): String {
 data class Distance(val meters: Double)
 
 val Double.meters: Distance get() = Distance(this)
+val Float.meters: Distance get() = Distance(this.toDouble())
 
 fun Distance.format(): String {
   return if (this.meters >= 1000) {

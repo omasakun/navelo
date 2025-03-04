@@ -104,6 +104,7 @@ import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
+import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.search.autocomplete.PlaceAutocomplete
 import com.mapbox.search.autocomplete.PlaceAutocompleteOptions
 import com.mapbox.search.autocomplete.PlaceAutocompleteSuggestion
@@ -120,6 +121,7 @@ import net.o137.navelo.stores.getBookmarksFlow
 import net.o137.navelo.stores.removeBookmark
 import net.o137.navelo.utils.FullMapState
 import net.o137.navelo.utils.MapboxRouteLine
+import net.o137.navelo.utils.ObserveRoutes
 import net.o137.navelo.utils.PinAnnotation
 import net.o137.navelo.utils.RequestLocationPermission
 import net.o137.navelo.utils.format
@@ -910,7 +912,16 @@ private fun MainContent(
     }
   }
 
-  MapboxRouteLine(theMapView?.mapboxMap, currentRoutes)
+  ObserveRoutes(mapboxNavigation, remember {
+    RoutesObserver {
+      currentRoutes = it.navigationRoutes
+    }
+  })
+
+  val mapboxMap = theMapView?.mapboxMap
+  if (mapboxMap != null) {
+    MapboxRouteLine(mapboxMap, currentRoutes)
+  }
 
   MapboxMap(
     // TODO: correct way to achieve edge-to-edge?
@@ -944,6 +955,22 @@ private fun MainContent(
     }
   ) {
     var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
+    val locationConsumer = remember {
+      object : LocationConsumer {
+        override fun onBearingUpdated(vararg bearing: Double, options: (ValueAnimator.() -> Unit)?) {}
+
+        override fun onError(error: LocationError) {}
+        override fun onHorizontalAccuracyRadiusUpdated(vararg radius: Double, options: (ValueAnimator.() -> Unit)?) {}
+        override fun onLocationUpdated(vararg location: Point, options: (ValueAnimator.() -> Unit)?) {
+          currentPoint = location.lastOrNull() ?: currentPoint
+          Log.d(TAG, "new location: $location")
+        }
+
+        override fun onPuckAccuracyRadiusAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
+        override fun onPuckBearingAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
+        override fun onPuckLocationAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
+      }
+    }
 
     DisposableMapEffect(Unit) { mapView ->
       Log.d(TAG, "MapEffect")
@@ -957,19 +984,9 @@ private fun MainContent(
       }
 
       // TODO: is this good?
-      mapView.location.getLocationProvider()?.registerLocationConsumer(object : LocationConsumer {
-        override fun onBearingUpdated(vararg bearing: Double, options: (ValueAnimator.() -> Unit)?) {}
-        override fun onError(error: LocationError) {}
-        override fun onHorizontalAccuracyRadiusUpdated(vararg radius: Double, options: (ValueAnimator.() -> Unit)?) {}
-        override fun onLocationUpdated(vararg location: Point, options: (ValueAnimator.() -> Unit)?) {
-          currentPoint = location.lastOrNull() ?: currentPoint
-          Log.d(TAG, "new location: $location")
-        }
+      val locationProvider = mapView.location.getLocationProvider()
+      locationProvider?.registerLocationConsumer(locationConsumer)
 
-        override fun onPuckAccuracyRadiusAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
-        override fun onPuckBearingAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
-        override fun onPuckLocationAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
-      })
       // mapView.location.setLocationProvider(activityGod.navigationLocationProvider)
       if (isFirstLaunch) {
         fullMapState.immediatelyFollowPuckState()
@@ -979,6 +996,7 @@ private fun MainContent(
       theMapView = mapView
       onDispose {
         Log.d(TAG, "MapEffect: onDispose")
+        locationProvider?.unRegisterLocationConsumer(locationConsumer)
         theMapView = null
       }
     }
