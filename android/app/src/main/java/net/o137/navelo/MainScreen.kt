@@ -3,7 +3,6 @@
 package net.o137.navelo
 
 import android.animation.ValueAnimator
-import android.annotation.SuppressLint
 import android.os.Parcelable
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -53,7 +52,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -62,7 +60,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,7 +70,6 @@ import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -95,31 +91,19 @@ import com.mapbox.api.directions.v5.DirectionsCriteria
 import com.mapbox.api.directions.v5.models.RouteOptions
 import com.mapbox.common.location.LocationError
 import com.mapbox.geojson.Point
-import com.mapbox.maps.CameraState
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.DisposableMapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
-import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
-import com.mapbox.maps.extension.compose.annotation.generated.PointAnnotation
-import com.mapbox.maps.extension.compose.annotation.rememberIconImage
 import com.mapbox.maps.extension.compose.style.MapStyle
-import com.mapbox.maps.extension.style.layers.properties.generated.IconAnchor
 import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.locationcomponent.LocationConsumer
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
-import com.mapbox.maps.plugin.viewport.ViewportStatus
-import com.mapbox.maps.plugin.viewport.data.DefaultViewportTransitionOptions
-import com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateOptions
 import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
-import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
-import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
-import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
-import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import com.mapbox.search.autocomplete.PlaceAutocomplete
 import com.mapbox.search.autocomplete.PlaceAutocompleteOptions
 import com.mapbox.search.autocomplete.PlaceAutocompleteSuggestion
@@ -134,20 +118,28 @@ import net.o137.navelo.stores.addBookmark
 import net.o137.navelo.stores.bookmarkDataStore
 import net.o137.navelo.stores.getBookmarksFlow
 import net.o137.navelo.stores.removeBookmark
+import net.o137.navelo.utils.FullMapState
+import net.o137.navelo.utils.MapboxRouteLine
+import net.o137.navelo.utils.PinAnnotation
 import net.o137.navelo.utils.RequestLocationPermission
 import net.o137.navelo.utils.format
 import net.o137.navelo.utils.formatHourMin
 import net.o137.navelo.utils.inset
 import net.o137.navelo.utils.meters
 import net.o137.navelo.utils.negativePadding
+import net.o137.navelo.utils.rememberFullMapState
 import net.o137.navelo.utils.rememberLocationPermissionState
 import kotlin.time.Duration.Companion.seconds
 
 
 private const val TAG = "MainScreen"
 
+private val LocalMainScreenGod = compositionLocalOf<MainScreenGod> {
+  error("No ScreenGod provided")
+}
 
-// TODO: god object
+
+// TODO: god class
 private data class MainScreenGod(
   val routes: MutableState<List<NavigationRoute>?> = mutableStateOf(null),
   val currentPoint: MutableState<Point?> = mutableStateOf(null),
@@ -156,9 +148,6 @@ private data class MainScreenGod(
   val snackbarHostState: SnackbarHostState
 )
 
-private val LocalMainScreenGod = compositionLocalOf<MainScreenGod> {
-  error("No ScreenGod provided")
-}
 
 @Composable
 fun MainScreen() {
@@ -227,7 +216,10 @@ private fun BottomNavigationBar(
   val scope = rememberCoroutineScope()
   val navController = LocalNavController.current
   val snackbarHostState = LocalMainScreenGod.current.snackbarHostState
+  val selectedPoint by LocalMainScreenGod.current.selectedPoint
   val routes by LocalMainScreenGod.current.routes
+  var destinationPoint by LocalActivityGod.current.destinationPoint
+  var navigationRoutes by LocalActivityGod.current.navigationRoutes
 
   BottomAppBar(
     actions = {
@@ -271,6 +263,8 @@ private fun BottomNavigationBar(
               snackbarHostState.showSnackbar("Long press on the map to choose a destination")
             }
           } else {
+            destinationPoint = selectedPoint
+            navigationRoutes = routes
             navController.navigate(Route.Navigation)
           }
         },
@@ -880,50 +874,11 @@ private fun MainContent(
   innerPadding: PaddingValues,
   fullMapState: FullMapState,
 ) {
-  val context = LocalContext.current
   val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
   var currentRoutes by LocalMainScreenGod.current.routes
   var currentPoint by LocalMainScreenGod.current.currentPoint
   var selectedPoint by LocalMainScreenGod.current.selectedPoint
   var theMapView by LocalMainScreenGod.current.mapView
-
-  val routeLineApi = remember {
-    MapboxRouteLineApi(MapboxRouteLineApiOptions.Builder().build())
-  }
-  val routeLineView = remember {
-    MapboxRouteLineView(
-      // road-label layer seems to be below the point annotation and location puck
-      // https://github.com/rnmapbox/maps/issues/806
-      MapboxRouteLineViewOptions.Builder(context)
-        .routeLineBelowLayerId("road-label")
-        .build()
-    )
-  }
-
-  // TODO: is this correct?
-  DisposableEffect(Unit) {
-    onDispose {
-      routeLineApi.cancel()
-      routeLineView.cancel()
-    }
-  }
-
-  LaunchedEffect(currentRoutes) {
-    val routes = currentRoutes
-    if (routes != null) {
-      routeLineApi.setNavigationRoutes(routes) { data ->
-        theMapView?.mapboxMap?.style?.let { style ->
-          routeLineView.renderRouteDrawData(style, data)
-        }
-      }
-    } else {
-      routeLineApi.clearRouteLine { data ->
-        theMapView?.mapboxMap?.style?.let { style ->
-          routeLineView.renderClearRouteLineValue(style, data)
-        }
-      }
-    }
-  }
 
   LaunchedEffect(selectedPoint) {
     val startPoint = currentPoint
@@ -953,8 +908,9 @@ private fun MainContent(
         }
       )
     }
-
   }
+
+  MapboxRouteLine(theMapView?.mapboxMap, currentRoutes)
 
   MapboxMap(
     // TODO: correct way to achieve edge-to-edge?
@@ -1031,73 +987,4 @@ private fun MainContent(
       PinAnnotation(it)
     }
   }
-}
-
-@Composable
-private fun PinAnnotation(point: Point) {
-  val markerId = R.drawable.ic_red_marker
-  val markerImage = rememberIconImage(markerId, painterResource(markerId))
-
-  PointAnnotation(point) {
-    this.iconImage = markerImage
-    this.iconOffset = listOf(0.0, 115.0 / 500.0 * 52.0)
-    this.iconAnchor = IconAnchor.BOTTOM
-  }
-}
-
-@Composable
-private fun rememberFullMapState(): FullMapState {
-  return rememberSaveable(saver = FullMapState.Saver) {
-    FullMapState()
-  }
-}
-
-// TODO: better name
-@SuppressLint("AutoboxingStateCreation")
-private class FullMapState {
-  var mapViewportState = MapViewportState().apply {
-    setCameraOptions {
-      center(Point.fromLngLat(139.692912, 35.688985)) // Tokyo
-      zoom(9.0)
-      pitch(0.0)
-    }
-  }
-
-  val followPuckOptions = FollowPuckViewportStateOptions.Builder().pitch(0.0).build()
-  val transitionOptions = DefaultViewportTransitionOptions.Builder().maxDurationMs(1000).build()
-
-  fun transitionToFollowPuckState() {
-    mapViewportState.transitionToFollowPuckState(followPuckOptions, transitionOptions)
-  }
-
-  fun immediatelyFollowPuckState() {
-    mapViewportState.transitionToFollowPuckState(
-      followPuckOptions,
-      DefaultViewportTransitionOptions.Builder().maxDurationMs(0).build()
-    )
-  }
-
-  fun isFollowingPuck(): Boolean {
-    return mapViewportState.mapViewportStatus != ViewportStatus.Idle
-  }
-
-  companion object {
-    val Saver: Saver<FullMapState, SavedState> = Saver(
-      save = {
-        SavedState(
-          it.mapViewportState.cameraState,
-        )
-      },
-      restore = {
-        FullMapState().apply {
-          if (it.cameraState != null) mapViewportState = MapViewportState(it.cameraState)
-        }
-      }
-    )
-  }
-
-  @Parcelize
-  data class SavedState(
-    val cameraState: CameraState?,
-  ) : Parcelable
 }

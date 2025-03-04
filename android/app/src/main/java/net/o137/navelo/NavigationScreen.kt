@@ -2,9 +2,12 @@
 
 package net.o137.navelo
 
+import android.annotation.SuppressLint
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -33,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.compositionLocalOf
@@ -57,21 +61,42 @@ import com.composables.icons.lucide.Route
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
 import com.mapbox.maps.MapView
+import com.mapbox.maps.Style
+import com.mapbox.maps.extension.compose.DisposableMapEffect
+import com.mapbox.maps.extension.compose.MapboxMap
+import com.mapbox.maps.extension.compose.style.MapStyle
+import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
+import com.mapbox.maps.plugin.locationcomponent.location
+import net.o137.navelo.utils.FullMapState
+import net.o137.navelo.utils.LocationPermissionState
+import net.o137.navelo.utils.MapboxRouteLine
+import net.o137.navelo.utils.RequestLocationPermission
+import net.o137.navelo.utils.enhancedLocationProvider
+import net.o137.navelo.utils.rememberFullMapState
+import net.o137.navelo.utils.rememberLocationPermissionState
+
 
 private const val TAG = "NavigationScreen"
-
-private data class NavigationScreenGod(
-  val mapView: MutableState<MapView?> = mutableStateOf(null),
-  val snackbarHostState: SnackbarHostState
-)
 
 private val LocalNavigationScreenGod = compositionLocalOf<NavigationScreenGod> {
   error("No ScreenGod provided")
 }
 
+
+// TODO: god class
+private class NavigationScreenGod(
+  val mapView: MutableState<MapView?> = mutableStateOf(null),
+  val snackbarHostState: SnackbarHostState,
+  val locationPermissionState: LocationPermissionState
+)
+
 @Composable
 fun NavigationScreen() {
   val navController = LocalNavController.current
+
+  val fullMapState = rememberFullMapState()
+  val locationPermissionState = rememberLocationPermissionState()
 
   val snackbarHostState = remember { SnackbarHostState() }
   var isPaused by remember { mutableStateOf(false) }
@@ -80,7 +105,14 @@ fun NavigationScreen() {
   val showRouteSheet = rememberSaveable { mutableStateOf(false) }
 
   val navigationScreenGod =
-    remember { NavigationScreenGod(snackbarHostState = snackbarHostState) }
+    remember {
+      NavigationScreenGod(
+        snackbarHostState = snackbarHostState,
+        locationPermissionState = locationPermissionState
+      )
+    }
+
+  RequestLocationPermission(locationPermissionState, askImmediately = true)
 
   if (showExitDialog) {
     AlertDialog(
@@ -110,6 +142,22 @@ fun NavigationScreen() {
   CompositionLocalProvider(LocalNavigationScreenGod provides navigationScreenGod) {
     Scaffold(
       snackbarHost = { SnackbarHost(snackbarHostState) },
+      floatingActionButton = {
+        if (!fullMapState.isFollowingPuck() || !locationPermissionState.isPermissionReady()) {
+          FloatingActionButton(
+            shape = CircleShape,
+            onClick = {
+              if (locationPermissionState.isPermissionReady()) {
+                fullMapState.transitionToFollowPuckState()
+              } else {
+                locationPermissionState.requestLocationPermission()
+              }
+            },
+          ) {
+            Icon(Lucide.Locate, "Current location")
+          }
+        }
+      },
       bottomBar = {
         BottomAppBar(
           actions = {
@@ -184,17 +232,8 @@ fun NavigationScreen() {
           },
         )
       },
-      floatingActionButton = {
-        FloatingActionButton(
-          shape = CircleShape,
-          onClick = { /* do something */ },
-        ) {
-          Icon(Lucide.Locate, "Current location")
-        }
-      },
     ) { innerPadding ->
-      Text(modifier = Modifier.padding(innerPadding), text = "Navigation screen")
-
+      MainContent(innerPadding, fullMapState)
       RouteSheet(showRouteSheet)
     }
   }
@@ -230,6 +269,68 @@ private fun RouteSheet(showRouteSheet: MutableState<Boolean>) {
         }
         Spacer(modifier = Modifier.height(8.dp))
         Text("Route details")
+      }
+    }
+  }
+}
+
+@Composable
+private fun MainContent(
+  innerPadding: PaddingValues,
+  fullMapState: FullMapState,
+) {
+  val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
+  val navigationRoutes by LocalActivityGod.current.navigationRoutes
+  val enhancedLocationProvider = enhancedLocationProvider(mapboxNavigation)
+  var theMapView by LocalNavigationScreenGod.current.mapView
+  val locationPermissionState = LocalNavigationScreenGod.current.locationPermissionState
+
+  DisposableEffect(Unit) {
+    @SuppressLint("MissingPermission")
+    if (locationPermissionState.isPermissionReady()) {
+      mapboxNavigation.startTripSession(false)
+    }
+    onDispose {
+      mapboxNavigation.stopTripSession()
+    }
+  }
+
+  MapboxRouteLine(theMapView?.mapboxMap, navigationRoutes)
+
+  MapboxMap(
+    // TODO: correct way to achieve edge-to-edge?
+    modifier = Modifier.padding(innerPadding),
+    compass = { Compass(modifier = Modifier.padding(16.dp)) },
+    scaleBar = { },
+    attribution = { Attribution(modifier = Modifier.padding(16.dp)) },
+    logo = { Logo(modifier = Modifier.padding(16.dp)) },
+    style = { MapStyle(Style.MAPBOX_STREETS) },
+    mapViewportState = fullMapState.mapViewportState,
+  ) {
+    var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
+
+    DisposableMapEffect(Unit) { mapView ->
+      Log.d(TAG, "MapEffect")
+
+      mapView.location.updateSettings {
+        enabled = true
+        locationPuck = createDefault2DPuck(withBearing = true)
+        puckBearingEnabled = true
+        puckBearing = PuckBearing.HEADING
+        showAccuracyRing = true
+      }
+
+      mapView.location.setLocationProvider(enhancedLocationProvider)
+
+      if (isFirstLaunch) {
+        fullMapState.immediatelyFollowPuckState()
+        isFirstLaunch = false
+      }
+
+      theMapView = mapView
+      onDispose {
+        Log.d(TAG, "MapEffect: onDispose")
+        theMapView = null
       }
     }
   }
