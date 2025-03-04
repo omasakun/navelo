@@ -3,7 +3,6 @@
 package net.o137.navelo
 
 
-import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -42,9 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Lucide
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.nio.charset.Charset
+import net.o137.navelo.utils.LicenseEntry
+import net.o137.navelo.utils.loadLicenses
 
 @Composable
 fun LicenseScreen() {
@@ -145,30 +143,3 @@ fun LicenseBottomSheet(license: LicenseEntry, onDismiss: () -> Unit) {
     }
   }
 }
-
-private suspend fun loadLicenses(context: Context): List<LicenseEntry> {
-  return withContext(Dispatchers.IO) {
-    val data = context.resources.openRawResource(R.raw.third_party_licenses).readBytes()
-    val metadataResource = context.resources.openRawResource(R.raw.third_party_license_metadata)
-    val metadata = metadataResource.bufferedReader().use { it.readLines() }
-    metadata.map { line ->
-      val (section, name) = line.split(" ", limit = 2)
-      val (start, length) = section.split(":").map(String::toInt)
-      val licenseData = data.sliceArray(start until start + length)
-      val licenseText = licenseData.toString(Charset.forName("UTF-8"))
-      LicenseEntry(name, trimEmptyLines(licenseText))
-    }.sortedBy { it.name }
-  }
-}
-
-private fun trimEmptyLines(text: String): String {
-  val lines = text.lines()
-  val start = lines.indexOfFirst { it.isNotBlank() }
-  val end = lines.indexOfLast { it.isNotBlank() }
-  return lines.subList(start, end + 1).joinToString("\n")
-}
-
-data class LicenseEntry(
-  val name: String,
-  val terms: String
-)

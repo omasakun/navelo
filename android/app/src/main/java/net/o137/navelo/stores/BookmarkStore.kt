@@ -1,4 +1,4 @@
-package net.o137.navelo
+package net.o137.navelo.stores
 
 import android.content.Context
 import android.os.Parcelable
@@ -11,15 +11,10 @@ import com.mapbox.geojson.Point
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.parcelize.Parcelize
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.descriptors.PrimitiveKind
-import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
-import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import net.o137.navelo.utils.PointSerializer
 
 val Context.bookmarkDataStore by preferencesDataStore(name = "bookmarks_store")
 
@@ -33,18 +28,6 @@ data class Bookmark(
   @Serializable(with = PointSerializer::class)
   val point: Point
 ) : Parcelable
-
-object PointSerializer : KSerializer<Point> {
-  override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("Point", PrimitiveKind.STRING)
-
-  override fun serialize(encoder: Encoder, value: Point) {
-    encoder.encodeString(value.toJson())
-  }
-
-  override fun deserialize(decoder: Decoder): Point {
-    return Point.fromJson(decoder.decodeString())
-  }
-}
 
 private fun readBookmarks(preferences: Preferences): List<Bookmark> {
   return preferences[BOOKMARKS_KEY]?.let { json ->

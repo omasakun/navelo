@@ -35,6 +35,8 @@ import com.mapbox.navigation.ui.maps.location.NavigationLocationProvider
 import kotlinx.serialization.Serializable
 import net.o137.navelo.ui.theme.NaveloTheme
 
+private const val TAG = "MainActivity"
+
 val LocalNavController = compositionLocalOf<NavController> {
   error("No NavController provided")
 }
@@ -129,14 +131,14 @@ class ActivityGod(private val context: Context) {
         enhancedLocation,
         locationMatcherResult.keyPoints,
       )
-      Log.i("ActivityGod", "Enhanced location: $enhancedLocation")
+      Log.i(TAG, "Enhanced location: $enhancedLocation")
     }
 
     /**
      * Invoked as soon as the [Location] is available.
      */
     override fun onNewRawLocation(rawLocation: Location) {
-      Log.i("ActivityGod", "Raw location: $rawLocation")
+      Log.i(TAG, "Raw location: $rawLocation")
     }
   }
 
@@ -145,20 +147,20 @@ class ActivityGod(private val context: Context) {
     onResumedObserver = object : MapboxNavigationObserver {
       @SuppressLint("MissingPermission") // TODO: handle permissions
       override fun onAttached(mapboxNavigation: MapboxNavigation) {
-        Log.i("ActivityGod", "MapboxNavigation attached")
-//        mapboxNavigation.registerLocationObserver(locationObserver)
-//        mapboxNavigation.startTripSession()
+        Log.i(TAG, "MapboxNavigation attached")
+        // mapboxNavigation.registerLocationObserver(locationObserver)
+        // mapboxNavigation.startTripSession()
       }
 
       override fun onDetached(mapboxNavigation: MapboxNavigation) {
-        Log.i("ActivityGod", "MapboxNavigation detached")
-//        mapboxNavigation.unregisterLocationObserver(locationObserver)
+        Log.i(TAG, "MapboxNavigation detached")
+        // mapboxNavigation.unregisterLocationObserver(locationObserver)
       }
     },
   )
 
   private fun initNavigation() {
-    Log.i("ActivityGod", "Initializing navigation")
+    Log.i(TAG, "Initializing navigation")
     MapboxNavigationApp.setup {
       NavigationOptions.Builder(context)
         .build()

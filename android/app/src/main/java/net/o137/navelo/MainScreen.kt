@@ -4,13 +4,8 @@ package net.o137.navelo
 
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Parcelable
 import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -73,11 +68,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -85,9 +78,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
-import androidx.core.app.ActivityCompat
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Bluetooth
 import com.composables.icons.lucide.Bookmark
@@ -138,12 +129,26 @@ import com.mapbox.search.common.NavigationProfile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
-import java.text.DecimalFormat
-import kotlin.time.Duration
+import net.o137.navelo.stores.Bookmark
+import net.o137.navelo.stores.addBookmark
+import net.o137.navelo.stores.bookmarkDataStore
+import net.o137.navelo.stores.getBookmarksFlow
+import net.o137.navelo.stores.removeBookmark
+import net.o137.navelo.utils.RequestLocationPermission
+import net.o137.navelo.utils.format
+import net.o137.navelo.utils.formatHourMin
+import net.o137.navelo.utils.inset
+import net.o137.navelo.utils.meters
+import net.o137.navelo.utils.negativePadding
+import net.o137.navelo.utils.rememberLocationPermissionState
 import kotlin.time.Duration.Companion.seconds
 
+
+private const val TAG = "MainScreen"
+
+
 // TODO: god object
-private data class ScreenGod(
+private data class MainScreenGod(
   val routes: MutableState<List<NavigationRoute>?> = mutableStateOf(null),
   val currentPoint: MutableState<Point?> = mutableStateOf(null),
   val selectedPoint: MutableState<Point?> = mutableStateOf(null),
@@ -151,13 +156,14 @@ private data class ScreenGod(
   val snackbarHostState: SnackbarHostState
 )
 
-private val LocalScreenGod = compositionLocalOf<ScreenGod> {
+private val LocalMainScreenGod = compositionLocalOf<MainScreenGod> {
   error("No ScreenGod provided")
 }
 
 @Composable
 fun MainScreen() {
   val fullMapState = rememberFullMapState()
+  val locationPermissionState = rememberLocationPermissionState()
 
   val snackbarHostState = remember { SnackbarHostState() }
   val searchExpanded = rememberSaveable { mutableStateOf(false) }
@@ -165,24 +171,24 @@ fun MainScreen() {
   val showPairingDialog = rememberSaveable { mutableStateOf(false) }
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
-  val screenGod = remember { ScreenGod(snackbarHostState = snackbarHostState) }
+  val mainScreenGod = remember { MainScreenGod(snackbarHostState = snackbarHostState) }
 
   HandleSearchReset(searchExpanded, searchQuery)
-  RequestLocationPermission(fullMapState)
+  RequestLocationPermission(locationPermissionState, askImmediately = false)
 
-  CompositionLocalProvider(LocalScreenGod provides screenGod) {
+  CompositionLocalProvider(LocalMainScreenGod provides mainScreenGod) {
     Scaffold(
       snackbarHost = { SnackbarHost(snackbarHostState) },
       modifier = Modifier.fillMaxSize(),
       floatingActionButton = {
-        if (!fullMapState.isFollowingPuck() || !fullMapState.isPermissionReady()) {
+        if (!fullMapState.isFollowingPuck() || !locationPermissionState.isPermissionReady()) {
           FloatingActionButton(
             shape = CircleShape,
             onClick = {
-              if (fullMapState.isPermissionReady()) {
+              if (locationPermissionState.isPermissionReady()) {
                 fullMapState.transitionToFollowPuckState()
               } else {
-                fullMapState.requestLocationPermission()
+                locationPermissionState.requestLocationPermission()
               }
             },
           ) {
@@ -213,30 +219,6 @@ private fun HandleSearchReset(
   }
 }
 
-fun Duration.formatHourMin(): String {
-  val totalMinutes = this.inWholeMinutes
-  val hours = totalMinutes / 60
-  val minutes = totalMinutes % 60
-  return when {
-    hours > 0 && minutes > 0 -> "$hours h $minutes min"
-    hours > 0 -> "$hours h"
-    else -> "$minutes min"
-  }
-}
-
-
-data class Distance(val meters: Double)
-
-val Double.meters: Distance get() = Distance(this)
-
-fun Distance.format(): String {
-  return if (this.meters >= 1000) {
-    DecimalFormat("#.##").format(this.meters / 1000) + " km"
-  } else {
-    DecimalFormat("#").format(this.meters) + " m"
-  }
-}
-
 @Composable
 private fun BottomNavigationBar(
   showPairingDialog: MutableState<Boolean>,
@@ -244,8 +226,8 @@ private fun BottomNavigationBar(
 ) {
   val scope = rememberCoroutineScope()
   val navController = LocalNavController.current
-  val snackbarHostState = LocalScreenGod.current.snackbarHostState
-  val routes by LocalScreenGod.current.routes
+  val snackbarHostState = LocalMainScreenGod.current.snackbarHostState
+  val routes by LocalMainScreenGod.current.routes
 
   BottomAppBar(
     actions = {
@@ -345,9 +327,9 @@ private fun SearchComponent(
 ) {
   val scope = rememberCoroutineScope()
   var searchResults by remember { mutableStateOf<List<SearchResult>>(listOf()) }
-  val mapView by LocalScreenGod.current.mapView
-  var selectedPoint by LocalScreenGod.current.selectedPoint
-  val snackbarHostState = LocalScreenGod.current.snackbarHostState
+  val mapView by LocalMainScreenGod.current.mapView
+  var selectedPoint by LocalMainScreenGod.current.selectedPoint
+  val snackbarHostState = LocalMainScreenGod.current.snackbarHostState
 
   val placeAutocomplete = remember { PlaceAutocomplete.create() }
 
@@ -377,10 +359,10 @@ private fun SearchComponent(
         placeAutocomplete.select(searchResult.detail)
           .onValue { value ->
             selectedPoint = value.coordinate
-            Log.d("MainScreen", "Selected: ${value.coordinate}")
+            Log.d(TAG, "Selected: ${value.coordinate}")
           }
           .onError {
-            Log.d("MainScreen", "Error: $it")
+            Log.d(TAG, "Error: $it")
             scope.launch {
               // TODO: proper handling
               snackbarHostState.showSnackbar("Error: $it")
@@ -479,101 +461,55 @@ private fun SearchBarIcon(expanded: MutableState<Boolean>) {
 }
 
 @Composable
-fun BookmarksSheet(
-  showBookmarks: MutableState<Boolean>,
-) {
+fun BookmarksSheet(showBookmarks: MutableState<Boolean>) {
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
-  var selectedPoint by LocalScreenGod.current.selectedPoint
-  val snackbarHostState = LocalScreenGod.current.snackbarHostState
+  var selectedPoint by LocalMainScreenGod.current.selectedPoint
+  val snackbarHostState = LocalMainScreenGod.current.snackbarHostState
   val placeAutocomplete = remember { PlaceAutocomplete.create() }
 
   val bookmarksFlow = getBookmarksFlow(context.bookmarkDataStore)
   val bookmarks by bookmarksFlow.collectAsState(initial = emptyList())
 
+  val showAddDialog = remember { mutableStateOf(false) }
   var newBookmarkPoint by remember { mutableStateOf<Point?>(null) }
-  var newBookmarkName by remember { mutableStateOf("") }
 
-  var showDeleteDialog by remember { mutableStateOf(false) }
+  val showDeleteDialog = remember { mutableStateOf(false) }
   var bookmarkToDelete by remember { mutableStateOf<Bookmark?>(null) }
 
-  val newPoint = newBookmarkPoint
-  if (newPoint != null) {
-    AlertDialog(
-      onDismissRequest = { newBookmarkPoint = null },
-      title = { Text("Add bookmark") },
-      text = {
-        Column {
-          Text("Enter a name for the new bookmark")
-          // TODO: auto focus on the text field
-          OutlinedTextField(
-            value = newBookmarkName,
-            onValueChange = { newBookmarkName = it },
-            label = { Text("Bookmark name") }
+  BookmarkAddDialog(
+    showDialog = showAddDialog,
+    onConfirm = { bookmarkName ->
+      newBookmarkPoint?.let { point ->
+        scope.launch {
+          // TODO: 直接 API を呼び出して確実に住所を取得する
+          val address = placeAutocomplete.getJapanAddress(point)
+          val newBookmark = Bookmark(
+            text = bookmarkName,
+            additionalInfo = address,
+            point = point
           )
+          addBookmark(context.bookmarkDataStore, newBookmark)
         }
-      },
-      confirmButton = {
-        TextButton(onClick = {
-          scope.launch {
-            // TODO: 直接 API を呼び出して確実に住所を取得する
-            val address = placeAutocomplete.reverse(
-              newPoint, PlaceAutocompleteOptions(
-                language = IsoLanguageCode("ja"), // TODO: JA -> error on placeAutocomplete.select
-                navigationProfile = NavigationProfile.CYCLING,
-                types = listOf(PlaceAutocompleteType.AdministrativeUnit.Address)
-              )
-            ).getValueOrElse { listOf() }
-            val addressText = (address.firstOrNull()?.name ?: "Unknown")
-            val addressText2 = if (addressText.startsWith("〒")) {
-              addressText.substring(10)
-            } else {
-              addressText
-            }
-            val newBookmark = Bookmark(
-              text = newBookmarkName,
-              additionalInfo = addressText2,
-              point = newPoint
-            )
-            addBookmark(context.bookmarkDataStore, newBookmark)
-          }
-          newBookmarkPoint = null
-        }) {
-          Text("Add")
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = {
-          newBookmarkPoint = null
-        }) {
-          Text("Cancel")
-        }
+        newBookmarkPoint = null
       }
-    )
-  }
+    },
+    onDismiss = {
+      newBookmarkPoint = null
+    }
+  )
 
-  if (showDeleteDialog) {
-    AlertDialog(
-      onDismissRequest = { showDeleteDialog = false },
-      title = { Text("Remove bookmark") },
-      text = { Text("Are you sure you want to remove this bookmark?") },
-      confirmButton = {
-        TextButton(onClick = {
-          bookmarkToDelete?.let { bookmark ->
-            scope.launch { removeBookmark(context.bookmarkDataStore, bookmark) }
-          }
-          showDeleteDialog = false
-        }) {
-          Text("Delete")
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showDeleteDialog = false }) {
-          Text("Cancel")
-        }
+  BookmarkDeleteDialog(
+    showDialog = showDeleteDialog,
+    onConfirm = {
+      bookmarkToDelete?.let { bookmark ->
+        scope.launch { removeBookmark(context.bookmarkDataStore, bookmark) }
       }
-    )
-  }
+    },
+    onDismiss = {
+      bookmarkToDelete = null
+    }
+  )
 
   BookmarksSheetLayout(
     showBookmarks = showBookmarks,
@@ -583,18 +519,33 @@ fun BookmarksSheet(
     },
     onLongPress = { bookmark ->
       bookmarkToDelete = bookmark
-      showDeleteDialog = true
+      showDeleteDialog.value = true
     },
     onAddClicked = {
       val point = selectedPoint
       if (point == null) {
         scope.launch { snackbarHostState.showSnackbar("Long press on the map to choose a location") }
       } else {
-        newBookmarkName = ""
         newBookmarkPoint = point
+        showAddDialog.value = true
       }
     }
   )
+}
+
+private suspend fun PlaceAutocomplete.getJapanAddress(point: Point): String {
+  val suggestions = this.reverse(
+    point, PlaceAutocompleteOptions(
+      language = IsoLanguageCode("ja"), // TODO: JA -> error on placeAutocomplete.select
+      types = listOf(PlaceAutocompleteType.AdministrativeUnit.Address)
+    )
+  ).getValueOrElse { listOf() }
+  val address = (suggestions.firstOrNull()?.name ?: "Unknown")
+  return if (address.startsWith("〒")) {
+    address.substring(10)
+  } else {
+    address
+  }
 }
 
 @Composable
@@ -672,9 +623,92 @@ private fun BookmarksSheetLayout(
 }
 
 @Composable
+private fun BookmarkAddDialog(
+  showDialog: MutableState<Boolean>,
+  onConfirm: (String) -> Unit,
+  onDismiss: () -> Unit
+) {
+  var bookmarkName by remember { mutableStateOf("") }
+  LaunchedEffect(showDialog.value) {
+    if (!showDialog.value) {
+      bookmarkName = ""
+    }
+  }
+  if (showDialog.value) {
+    AlertDialog(
+      onDismissRequest = {
+        showDialog.value = false
+        onDismiss()
+      },
+      title = { Text("Add bookmark") },
+      text = {
+        Column {
+          Text("Enter a name for the new bookmark")
+          OutlinedTextField(
+            value = bookmarkName,
+            onValueChange = { bookmarkName = it },
+            label = { Text("Bookmark name") }
+          )
+        }
+      },
+      confirmButton = {
+        TextButton(onClick = {
+          showDialog.value = false
+          onConfirm(bookmarkName)
+        }) {
+          Text("Add")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = {
+          showDialog.value = false
+          onDismiss()
+        }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+}
+
+@Composable
+private fun BookmarkDeleteDialog(
+  showDialog: MutableState<Boolean>,
+  onConfirm: () -> Unit,
+  onDismiss: () -> Unit
+) {
+  if (showDialog.value) {
+    AlertDialog(
+      onDismissRequest = {
+        showDialog.value = false
+        onDismiss()
+      },
+      title = { Text("Remove bookmark") },
+      text = { Text("Are you sure you want to remove this bookmark?") },
+      confirmButton = {
+        TextButton(onClick = {
+          showDialog.value = false
+          onConfirm()
+        }) {
+          Text("Delete")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = {
+          showDialog.value = false
+          onDismiss()
+        }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+}
+
+@Composable
 private fun PairingDialog(openDialog: MutableState<Boolean>) {
   PairingDialogLayout(
-    openDialog = openDialog,
+    showDialog = openDialog,
     getDevices = {
       delay(1000)
       (0..3).random().let { count ->
@@ -692,7 +726,7 @@ private fun PairingDialog(openDialog: MutableState<Boolean>) {
 
 @Composable
 private fun PairingDialogLayout(
-  openDialog: MutableState<Boolean>,
+  showDialog: MutableState<Boolean>,
   getDevices: suspend () -> List<BluetoothDevice>,
   pairDevice: suspend (BluetoothDevice) -> Boolean
 ) {
@@ -700,13 +734,13 @@ private fun PairingDialogLayout(
   val pairingState = rememberSaveable { mutableStateOf<PairingState>(PairingState.SCAN) }
   val devices = remember { mutableStateOf<List<BluetoothDevice>?>(null) }
 
-  LaunchedEffect(openDialog.value) {
-    if (!openDialog.value) {
+  LaunchedEffect(showDialog.value) {
+    if (!showDialog.value) {
       pairingState.value = PairingState.SCAN
     }
   }
 
-  if (openDialog.value) {
+  if (showDialog.value) {
     AlertDialog(
       onDismissRequest = { /* Do nothing */ },
       title = {
@@ -812,7 +846,7 @@ private fun PairingDialogLayout(
           }
 
           is PairingState.COMPLETE, is PairingState.FAILED -> {
-            TextButton(onClick = { openDialog.value = false }) { Text("OK") }
+            TextButton(onClick = { showDialog.value = false }) { Text("OK") }
           }
 
           else -> {}
@@ -822,7 +856,7 @@ private fun PairingDialogLayout(
         when (pairingState.value) {
           is PairingState.COMPLETE, is PairingState.FAILED -> {}
           else -> {
-            TextButton(onClick = { openDialog.value = false }) { Text("Cancel") }
+            TextButton(onClick = { showDialog.value = false }) { Text("Cancel") }
           }
         }
       }
@@ -848,10 +882,10 @@ private fun MainContent(
 ) {
   val context = LocalContext.current
   val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
-  var currentRoutes by LocalScreenGod.current.routes
-  var currentPoint by LocalScreenGod.current.currentPoint
-  var selectedPoint by LocalScreenGod.current.selectedPoint
-  var theMapView by LocalScreenGod.current.mapView
+  var currentRoutes by LocalMainScreenGod.current.routes
+  var currentPoint by LocalMainScreenGod.current.currentPoint
+  var selectedPoint by LocalMainScreenGod.current.selectedPoint
+  var theMapView by LocalMainScreenGod.current.mapView
 
   val routeLineApi = remember {
     MapboxRouteLineApi(MapboxRouteLineApiOptions.Builder().build())
@@ -898,23 +932,23 @@ private fun MainContent(
       currentRoutes = null
       mapboxNavigation.requestRoutes(
         RouteOptions.builder().applyDefaultNavigationOptions(DirectionsCriteria.PROFILE_CYCLING)
-//            .alleyBias()
-//            .enableRefresh()
-//            .steps()
+          //  .alleyBias()
+          //  .enableRefresh()
+          //  .steps()
           .coordinatesList(listOf(startPoint, endPoint))
           .build(),
         object : NavigationRouterCallback {
           override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
-            Log.d("MainScreen", "Router: onCanceled")
+            Log.d(TAG, "Router: onCanceled")
           }
 
           override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
-            Log.d("MainScreen", "Router: onFailure")
+            Log.d(TAG, "Router: onFailure")
           }
 
           override fun onRoutesReady(routes: List<NavigationRoute>, routerOrigin: String) {
             currentRoutes = routes
-            Log.d("MainScreen", "Router: onRoutesReady ${routes.size}")
+            Log.d(TAG, "Router: onRoutesReady ${routes.size}")
           }
         }
       )
@@ -956,7 +990,7 @@ private fun MainContent(
     var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
 
     DisposableMapEffect(Unit) { mapView ->
-      Log.d("MainScreen", "MapEffect")
+      Log.d(TAG, "MapEffect")
 
       mapView.location.updateSettings {
         enabled = true
@@ -973,14 +1007,14 @@ private fun MainContent(
         override fun onHorizontalAccuracyRadiusUpdated(vararg radius: Double, options: (ValueAnimator.() -> Unit)?) {}
         override fun onLocationUpdated(vararg location: Point, options: (ValueAnimator.() -> Unit)?) {
           currentPoint = location.lastOrNull() ?: currentPoint
-          Log.d("MainScreen", "new location: $location")
+          Log.d(TAG, "new location: $location")
         }
 
         override fun onPuckAccuracyRadiusAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
         override fun onPuckBearingAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
         override fun onPuckLocationAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
       })
-//      mapView.location.setLocationProvider(activityGod.navigationLocationProvider)
+      // mapView.location.setLocationProvider(activityGod.navigationLocationProvider)
       if (isFirstLaunch) {
         fullMapState.immediatelyFollowPuckState()
         isFirstLaunch = false
@@ -988,24 +1022,26 @@ private fun MainContent(
 
       theMapView = mapView
       onDispose {
-        Log.d("MainScreen", "MapEffect: onDispose")
+        Log.d(TAG, "MapEffect: onDispose")
         theMapView = null
       }
     }
 
-    // val markerPainter = rememberVectorPainter(Lucide.MapPin)
-    val markerId = R.drawable.ic_red_marker
-    val markerImage = rememberIconImage(markerId, painterResource(markerId))
-
-
-    val point = selectedPoint
-    if (point != null) {
-      PointAnnotation(point) {
-        this.iconImage = markerImage
-        this.iconOffset = listOf(0.0, 115.0 / 500.0 * 52.0)
-        this.iconAnchor = IconAnchor.BOTTOM
-      }
+    selectedPoint?.let {
+      PinAnnotation(it)
     }
+  }
+}
+
+@Composable
+private fun PinAnnotation(point: Point) {
+  val markerId = R.drawable.ic_red_marker
+  val markerImage = rememberIconImage(markerId, painterResource(markerId))
+
+  PointAnnotation(point) {
+    this.iconImage = markerImage
+    this.iconOffset = listOf(0.0, 115.0 / 500.0 * 52.0)
+    this.iconAnchor = IconAnchor.BOTTOM
   }
 }
 
@@ -1030,10 +1066,6 @@ private class FullMapState {
   val followPuckOptions = FollowPuckViewportStateOptions.Builder().pitch(0.0).build()
   val transitionOptions = DefaultViewportTransitionOptions.Builder().maxDurationMs(1000).build()
 
-  var permissionRequestCount by mutableStateOf(0)
-    private set
-  var permissionReady by mutableStateOf<Boolean?>(null)
-
   fun transitionToFollowPuckState() {
     mapViewportState.transitionToFollowPuckState(followPuckOptions, transitionOptions)
   }
@@ -1045,17 +1077,8 @@ private class FullMapState {
     )
   }
 
-  fun requestLocationPermission() {
-    permissionRequestCount++
-    Log.d("RequestLocationPermission", "$permissionRequestCount")
-  }
-
   fun isFollowingPuck(): Boolean {
     return mapViewportState.mapViewportStatus != ViewportStatus.Idle
-  }
-
-  fun isPermissionReady(): Boolean {
-    return permissionReady == true
   }
 
   companion object {
@@ -1063,15 +1086,11 @@ private class FullMapState {
       save = {
         SavedState(
           it.mapViewportState.cameraState,
-          it.permissionRequestCount,
-          it.permissionReady
         )
       },
       restore = {
         FullMapState().apply {
           if (it.cameraState != null) mapViewportState = MapViewportState(it.cameraState)
-          permissionRequestCount = it.permissionRequestCount
-          permissionReady = it.permissionReady
         }
       }
     )
@@ -1080,84 +1099,5 @@ private class FullMapState {
   @Parcelize
   data class SavedState(
     val cameraState: CameraState?,
-    val permissionRequestCount: Int,
-    val permissionReady: Boolean?
   ) : Parcelable
-}
-
-@Composable
-private fun RequestLocationPermission(fullMapState: FullMapState) {
-  val context = LocalContext.current
-  val launcher = rememberLauncherForActivityResult(
-    ActivityResultContracts.RequestMultiplePermissions(),
-  ) { permissionsMap ->
-    fullMapState.permissionReady = permissionsMap.values.all { it }
-  }
-
-  var showAlertDialog by remember { mutableStateOf(false) }
-
-  val requestCount = fullMapState.permissionRequestCount
-  LaunchedEffect(requestCount) {
-    if (locationPermissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
-      fullMapState.permissionReady = true
-    } else {
-      val permanentlyDenied = locationPermissions.any {
-        !ActivityCompat.shouldShowRequestPermissionRationale(context as MainActivity, it)
-      }
-      if (permanentlyDenied) {
-        // don't show dialog without user interaction
-        if (requestCount > 0) {
-          showAlertDialog = true
-        }
-      } else {
-        launcher.launch(locationPermissions)
-      }
-    }
-  }
-
-  if (showAlertDialog) {
-    AlertDialog(
-      onDismissRequest = { showAlertDialog = false },
-      title = { Text("Permission Required") },
-      text = { Text("This app needs access to location information, but the permission has been permanently denied. Please change the settings.") },
-      confirmButton = {
-        TextButton(onClick = {
-          context.startActivity(
-            Intent(
-              android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-              Uri.fromParts("package", context.packageName, null)
-            )
-          )
-          showAlertDialog = false
-        }) {
-          Text("Go to Settings")
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showAlertDialog = false }) {
-          Text("Cancel")
-        }
-      }
-    )
-  }
-}
-
-private val locationPermissions = arrayOf(
-  android.Manifest.permission.ACCESS_FINE_LOCATION,
-  android.Manifest.permission.ACCESS_COARSE_LOCATION
-)
-
-private fun Rect.inset(dx: Float, dy: Float): Rect {
-  return Rect(left + dx, top + dy, right - dx, bottom - dy)
-}
-
-// TODO: better solution
-private fun Modifier.negativePadding(horizontal: Dp): Modifier {
-  return this.layout { measurable, constraints ->
-    val placeable = measurable.measure(constraints.offset((-horizontal * 2).roundToPx()))
-    layout(
-      width = placeable.width + (horizontal * 2).roundToPx(),
-      height = placeable.height
-    ) { placeable.place(horizontal.roundToPx(), 0) }
-  }
 }
