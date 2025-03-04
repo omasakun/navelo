@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Info

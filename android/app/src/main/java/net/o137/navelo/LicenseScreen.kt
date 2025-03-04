@@ -40,7 +40,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Lucide
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +47,7 @@ import kotlinx.coroutines.withContext
 import java.nio.charset.Charset
 
 @Composable
-fun LicenseScreen(){
+fun LicenseScreen() {
   val navController = LocalNavController.current
 
   Scaffold(

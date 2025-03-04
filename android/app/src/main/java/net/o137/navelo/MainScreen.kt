@@ -107,7 +107,7 @@ import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraState
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
-import com.mapbox.maps.extension.compose.MapEffect
+import com.mapbox.maps.extension.compose.DisposableMapEffect
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
 import com.mapbox.maps.extension.compose.annotation.generated.PointAnnotation
@@ -143,7 +143,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 // TODO: god object
-private data class GodData(
+private data class ScreenGod(
   val routes: MutableState<List<NavigationRoute>?> = mutableStateOf(null),
   val currentPoint: MutableState<Point?> = mutableStateOf(null),
   val selectedPoint: MutableState<Point?> = mutableStateOf(null),
@@ -151,8 +151,8 @@ private data class GodData(
   val snackbarHostState: SnackbarHostState
 )
 
-private val LocalGodData = compositionLocalOf<GodData> {
-  error("No GodData provided")
+private val LocalScreenGod = compositionLocalOf<ScreenGod> {
+  error("No ScreenGod provided")
 }
 
 @Composable
@@ -165,12 +165,12 @@ fun MainScreen() {
   val showPairingDialog = rememberSaveable { mutableStateOf(false) }
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
-  val godData = remember { GodData(snackbarHostState = snackbarHostState) }
+  val screenGod = remember { ScreenGod(snackbarHostState = snackbarHostState) }
 
   HandleSearchReset(searchExpanded, searchQuery)
   RequestLocationPermission(fullMapState)
 
-  CompositionLocalProvider(LocalGodData provides godData) {
+  CompositionLocalProvider(LocalScreenGod provides screenGod) {
     Scaffold(
       snackbarHost = { SnackbarHost(snackbarHostState) },
       modifier = Modifier.fillMaxSize(),
@@ -244,8 +244,8 @@ private fun BottomNavigationBar(
 ) {
   val scope = rememberCoroutineScope()
   val navController = LocalNavController.current
-  val godData = LocalGodData.current
-  val routes by godData.routes
+  val snackbarHostState = LocalScreenGod.current.snackbarHostState
+  val routes by LocalScreenGod.current.routes
 
   BottomAppBar(
     actions = {
@@ -286,7 +286,7 @@ private fun BottomNavigationBar(
           if (routes?.firstOrNull() == null) {
             // TODO: focus search box
             scope.launch {
-              godData.snackbarHostState.showSnackbar("Long press on the map to choose a destination")
+              snackbarHostState.showSnackbar("Long press on the map to choose a destination")
             }
           } else {
             navController.navigate(Route.Navigation)
@@ -345,9 +345,9 @@ private fun SearchComponent(
 ) {
   val scope = rememberCoroutineScope()
   var searchResults by remember { mutableStateOf<List<SearchResult>>(listOf()) }
-  val mapView by LocalGodData.current.mapView
-  var selectedPoint by LocalGodData.current.selectedPoint
-  val snackbarHostState = LocalGodData.current.snackbarHostState
+  val mapView by LocalScreenGod.current.mapView
+  var selectedPoint by LocalScreenGod.current.selectedPoint
+  val snackbarHostState = LocalScreenGod.current.snackbarHostState
 
   val placeAutocomplete = remember { PlaceAutocomplete.create() }
 
@@ -484,8 +484,8 @@ fun BookmarksSheet(
 ) {
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
-  var selectedPoint by LocalGodData.current.selectedPoint
-  val snackbarHostState = LocalGodData.current.snackbarHostState
+  var selectedPoint by LocalScreenGod.current.selectedPoint
+  val snackbarHostState = LocalScreenGod.current.snackbarHostState
   val placeAutocomplete = remember { PlaceAutocomplete.create() }
 
   val bookmarksFlow = getBookmarksFlow(context.bookmarkDataStore)
@@ -847,12 +847,11 @@ private fun MainContent(
   fullMapState: FullMapState,
 ) {
   val context = LocalContext.current
-  val navigationGod = LocalNavigationGod.current
-  val godData = LocalGodData.current
-  var currentRoutes by godData.routes
-  var currentPoint by godData.currentPoint
-  var selectedPoint by godData.selectedPoint
-  var theMapView by godData.mapView
+  val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
+  var currentRoutes by LocalScreenGod.current.routes
+  var currentPoint by LocalScreenGod.current.currentPoint
+  var selectedPoint by LocalScreenGod.current.selectedPoint
+  var theMapView by LocalScreenGod.current.mapView
 
   val routeLineApi = remember {
     MapboxRouteLineApi(MapboxRouteLineApiOptions.Builder().build())
@@ -897,7 +896,7 @@ private fun MainContent(
     val endPoint = selectedPoint
     if (startPoint != null && endPoint != null) {
       currentRoutes = null
-      navigationGod.mapboxNavigation.requestRoutes(
+      mapboxNavigation.requestRoutes(
         RouteOptions.builder().applyDefaultNavigationOptions(DirectionsCriteria.PROFILE_CYCLING)
 //            .alleyBias()
 //            .enableRefresh()
@@ -956,9 +955,9 @@ private fun MainContent(
   ) {
     var isFirstLaunch by rememberSaveable { mutableStateOf(true) }
 
-    MapEffect(Unit) { mapView ->
+    DisposableMapEffect(Unit) { mapView ->
       Log.d("MainScreen", "MapEffect")
-      theMapView = mapView
+
       mapView.location.updateSettings {
         enabled = true
         locationPuck = createDefault2DPuck(withBearing = true)
@@ -981,10 +980,16 @@ private fun MainContent(
         override fun onPuckBearingAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
         override fun onPuckLocationAnimatorDefaultOptionsUpdated(options: ValueAnimator.() -> Unit) {}
       })
-//      mapView.location.setLocationProvider(navigationGod.navigationLocationProvider)
+//      mapView.location.setLocationProvider(activityGod.navigationLocationProvider)
       if (isFirstLaunch) {
         fullMapState.immediatelyFollowPuckState()
         isFirstLaunch = false
+      }
+
+      theMapView = mapView
+      onDispose {
+        Log.d("MainScreen", "MapEffect: onDispose")
+        theMapView = null
       }
     }
 
