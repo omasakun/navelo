@@ -53,6 +53,7 @@ dependencies {
   // TODO: remove unused dependencies
   implementation(libs.composables.icons.lucide)
   implementation(libs.compose.preference)
+  implementation(libs.kable.core)
   implementation(libs.mapbox.android)
   implementation(libs.mapbox.compose)
   implementation(libs.mapbox.navigation)
@@ -75,6 +76,7 @@ dependencies {
   implementation(libs.androidx.ui.tooling.preview)
   implementation(libs.material)
   implementation(platform(libs.androidx.compose.bom))
+  implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.serialization.json)
   testImplementation(libs.junit)
   androidTestImplementation(libs.androidx.espresso.core)
