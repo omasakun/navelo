@@ -104,7 +104,7 @@ import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
-import com.mapbox.navigation.core.directions.session.RoutesObserver
+import com.mapbox.navigation.core.trip.session.NavigationSessionState
 import com.mapbox.search.autocomplete.PlaceAutocomplete
 import com.mapbox.search.autocomplete.PlaceAutocompleteOptions
 import com.mapbox.search.autocomplete.PlaceAutocompleteSuggestion
@@ -121,7 +121,6 @@ import net.o137.navelo.stores.getBookmarksFlow
 import net.o137.navelo.stores.removeBookmark
 import net.o137.navelo.utils.FullMapState
 import net.o137.navelo.utils.MapboxRouteLine
-import net.o137.navelo.utils.ObserveRoutes
 import net.o137.navelo.utils.PinAnnotation
 import net.o137.navelo.utils.RequestLocationPermission
 import net.o137.navelo.utils.format
@@ -163,6 +162,16 @@ fun MainScreen() {
   val searchQuery = rememberSaveable { mutableStateOf("") }
 
   val mainScreenGod = remember { MainScreenGod(snackbarHostState = snackbarHostState) }
+
+
+  // TODO: better way to check if navigation is active?
+  val isIdle = LocalActivityGod.current.mapboxNavigation.getNavigationSessionState() == NavigationSessionState.Idle
+
+  // TODO: how to setup proper backstack without flickering?
+  if (!isIdle) {
+    LocalNavController.current.navigate(Route.Navigation)
+    return
+  }
 
   HandleSearchReset(searchExpanded, searchQuery)
   RequestLocationPermission(locationPermissionState, askImmediately = false)
@@ -220,7 +229,6 @@ private fun BottomNavigationBar(
   val snackbarHostState = LocalMainScreenGod.current.snackbarHostState
   val selectedPoint by LocalMainScreenGod.current.selectedPoint
   val routes by LocalMainScreenGod.current.routes
-  var destinationPoint by LocalActivityGod.current.destinationPoint
   var navigationRoutes by LocalActivityGod.current.navigationRoutes
 
   BottomAppBar(
@@ -265,7 +273,6 @@ private fun BottomNavigationBar(
               snackbarHostState.showSnackbar("Long press on the map to choose a destination")
             }
           } else {
-            destinationPoint = selectedPoint
             navigationRoutes = routes
             navController.navigate(Route.Navigation)
           }
@@ -911,12 +918,6 @@ private fun MainContent(
       )
     }
   }
-
-  ObserveRoutes(mapboxNavigation, remember {
-    RoutesObserver {
-      currentRoutes = it.navigationRoutes
-    }
-  })
 
   val mapboxMap = theMapView?.mapboxMap
   if (mapboxMap != null) {

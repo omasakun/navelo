@@ -1,6 +1,5 @@
 package net.o137.navelo
 
-import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,11 +21,7 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.mapbox.geojson.Point
-import com.mapbox.navigation.base.options.NavigationOptions
 import com.mapbox.navigation.base.route.NavigationRoute
-import com.mapbox.navigation.core.MapboxNavigation
-import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.requireMapboxNavigation
 import kotlinx.serialization.Serializable
 import net.o137.navelo.ui.theme.NaveloTheme
@@ -44,15 +39,9 @@ val LocalActivityGod = compositionLocalOf<ActivityGod> {
 }
 
 // TODO: god class
-class ActivityGod(private val context: Context) {
-  val destinationPoint = mutableStateOf<Point?>(null)
+class ActivityGod(lifecycleOwner: LifecycleOwner) {
+  val mapboxNavigation by lifecycleOwner.requireMapboxNavigation()
   val navigationRoutes = mutableStateOf<List<NavigationRoute>?>(null)
-
-  val mapboxNavigation: MapboxNavigation by (context as LifecycleOwner).requireMapboxNavigation {
-    MapboxNavigationApp.setup {
-      NavigationOptions.Builder(context).build()
-    }
-  }
 }
 
 
@@ -63,9 +52,6 @@ class MainActivity : ComponentActivity() {
     // enableEdgeToEdge()
 
     val activityGod = ActivityGod(this)
-
-    // TODO: continue to run in background
-    // MapboxNavigationApp.attach(this)
 
     setContent {
       App(activityGod)
@@ -82,7 +68,6 @@ private fun App(activityGod: ActivityGod) {
         .background(MaterialTheme.colorScheme.background)
     ) {
       val navController = rememberNavController()
-
       CompositionLocalProvider(LocalNavController provides navController, LocalActivityGod provides activityGod) {
         NavHost(
           navController = navController,

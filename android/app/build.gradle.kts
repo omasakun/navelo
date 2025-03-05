@@ -68,6 +68,7 @@ dependencies {
   implementation(libs.androidx.appcompat)
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.lifecycle.extensions)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.material3)
   implementation(libs.androidx.navigation.compose)

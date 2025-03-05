@@ -36,7 +36,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.compositionLocalOf
@@ -47,6 +46,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -69,6 +69,8 @@ import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.navigation.core.directions.session.RoutesObserver
+import com.mapbox.navigation.core.trip.session.NavigationSessionState
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.core.trip.session.TripSessionState
 import net.o137.navelo.utils.FullMapState
@@ -77,6 +79,7 @@ import net.o137.navelo.utils.LocationPermissionState
 import net.o137.navelo.utils.MapboxRouteArrow
 import net.o137.navelo.utils.MapboxRouteLine
 import net.o137.navelo.utils.ObserveRouteProgress
+import net.o137.navelo.utils.ObserveRoutes
 import net.o137.navelo.utils.RequestLocationPermission
 import net.o137.navelo.utils.format
 import net.o137.navelo.utils.formatHourMin
@@ -105,6 +108,7 @@ private class NavigationScreenGod(
 @Composable
 fun NavigationScreen() {
   val navController = LocalNavController.current
+  val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
 
   val fullMapState = rememberFullMapState()
   val locationPermissionState = rememberLocationPermissionState()
@@ -133,7 +137,9 @@ fun NavigationScreen() {
       confirmButton = {
         TextButton(onClick = {
           showExitDialog = false
-          navController.popBackStack()
+          navController.popBackStack(Route.Main, inclusive = false)
+          mapboxNavigation.stopTripSession() // TODO: proper place to put this?
+          Log.d(TAG, "stopTripSession")
         }) {
           Text("Yes")
         }
@@ -206,7 +212,6 @@ fun NavigationScreen() {
             Spacer(modifier = Modifier.weight(1f))
             if (isPaused) Spacer(modifier = Modifier.width(24.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
               val routeProgress = useRouteProgress(mapboxNavigation)
               val distance = routeProgress?.distanceRemaining?.meters
               val duration = routeProgress?.durationRemaining?.seconds
@@ -291,34 +296,45 @@ private fun RouteSheet(showRouteSheet: MutableState<Boolean>) {
 }
 
 @Composable
+private fun AutoStartTrip() {
+  val context = LocalContext.current
+  val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
+  val navigationRoutes by LocalActivityGod.current.navigationRoutes
+  val locationPermissionState = LocalNavigationScreenGod.current.locationPermissionState
+  val isPermissionGranted = locationPermissionState.isGranted == true
+
+  LaunchedEffect(isPermissionGranted) {
+    val isStarted = mapboxNavigation.getTripSessionState() == TripSessionState.STARTED
+    val routes = navigationRoutes
+    @SuppressLint("MissingPermission")
+    if (isPermissionGranted && !isStarted && routes != null) {
+      Log.d(TAG, "startTripSession")
+      mapboxNavigation.setNavigationRoutes(routes)
+      mapboxNavigation.startTripSession(false)
+      context.startNaveloService()
+    }
+  }
+}
+
+@Composable
 private fun MainContent(
   innerPadding: PaddingValues,
   fullMapState: FullMapState,
 ) {
   val mapboxNavigation = LocalActivityGod.current.mapboxNavigation
-  val navigationRoutes by LocalActivityGod.current.navigationRoutes
+  var navigationRoutes by LocalActivityGod.current.navigationRoutes
   val enhancedLocationProvider = useEnhancedLocationProvider(mapboxNavigation)
   var theMapView by LocalNavigationScreenGod.current.mapView
-  val locationPermissionState = LocalNavigationScreenGod.current.locationPermissionState
-  val isPermissionGranted = locationPermissionState.isGranted == true
 
-  DisposableEffect(isPermissionGranted) {
-    val routes = navigationRoutes
-    @SuppressLint("MissingPermission")
-    if (isPermissionGranted && routes != null) {
-      Log.d(TAG, "startTripSession")
-      mapboxNavigation.setNavigationRoutes(routes)
-      mapboxNavigation.startTripSession(false)
-    } else {
-      Log.d(TAG, "startTripSession was skipped: permission=$isPermissionGranted, routes=$routes")
-    }
-    onDispose {
-      Log.d(TAG, "stopTripSession")
-      if (mapboxNavigation.getTripSessionState() == TripSessionState.STARTED) {
-        mapboxNavigation.stopTripSession()
+  AutoStartTrip()
+
+  ObserveRoutes(mapboxNavigation, remember {
+    RoutesObserver {
+      if (mapboxNavigation.getNavigationSessionState() != NavigationSessionState.Idle) {
+        navigationRoutes = it.navigationRoutes
       }
     }
-  }
+  })
 
   val mapboxMap = theMapView?.mapboxMap
   if (mapboxMap != null) {
