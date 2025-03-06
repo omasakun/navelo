@@ -3,6 +3,8 @@
 package net.o137.navelo
 
 import android.animation.ValueAnimator
+import android.bluetooth.le.ScanRecord.DATA_TYPE_LOCAL_NAME_COMPLETE
+import android.bluetooth.le.ScanRecord.DATA_TYPE_LOCAL_NAME_SHORT
 import android.os.Parcelable
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -75,6 +77,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Bluetooth
 import com.composables.icons.lucide.Bookmark
@@ -87,6 +90,8 @@ import com.composables.icons.lucide.MapPin
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
+import com.juul.kable.Peripheral
+import com.juul.kable.PlatformAdvertisement
 import com.mapbox.api.directions.v5.DirectionsCriteria
 import com.mapbox.api.directions.v5.models.RouteOptions
 import com.mapbox.common.location.LocationError
@@ -111,7 +116,9 @@ import com.mapbox.search.autocomplete.PlaceAutocompleteSuggestion
 import com.mapbox.search.autocomplete.PlaceAutocompleteType
 import com.mapbox.search.common.IsoLanguageCode
 import com.mapbox.search.common.NavigationProfile
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 import net.o137.navelo.stores.Bookmark
@@ -712,30 +719,71 @@ private fun BookmarkDeleteDialog(
 private fun PairingDialog(openDialog: MutableState<Boolean>) {
   PairingDialogLayout(
     showDialog = openDialog,
-    getDevices = {
-      delay(1000)
-      (0..3).random().let { count ->
-        (0 until count * 5).map { index ->
-          BluetoothDevice("Device $index", "00:11:22:33:44:55")
+    scanDevices = {
+      NaveloDevice.scanner.advertisements
+        .map { BluetoothDevice(it.name ?: "Unknown Device", it.address, it) }
+        .runningFold<BluetoothDevice, List<BluetoothDevice>?>(null) { acc, device ->
+          Log.d(TAG, "${device.detail} ${device.detail.bytes?.parseNameFromBytes()}")
+          if (acc == null) {
+            listOf(device)
+          } else {
+            val updatedList = acc.map { if (it.address == device.address) device else it }
+            if (acc.any { it.address == device.address }) updatedList else updatedList + device
+          }
         }
-      }
     },
     pairDevice = { device ->
-      delay(2000)
-      (0..1).random() == 0
+      try {
+        val naveloDevice = NaveloDevice(
+          Peripheral(device.detail) {
+            autoConnectIf { true }
+          }
+        )
+        naveloDevice.connect()
+        ApplicationGod.naveloDevice.value = naveloDevice
+        true
+      } catch (e: Exception) {
+        false
+      }
     }
   )
+}
+
+private fun ByteArray.parseNameFromBytes(): String? {
+  var pos = 0
+  var localName: String? = null
+  try {
+    while (pos < this.size) {
+      val length = this[pos++].toInt() and 0xFF
+      if (length == 0) {
+        break
+      }
+      val dataLength = length - 1
+      val fieldType = this[pos++].toInt() and 0xFF
+      when (fieldType) {
+        DATA_TYPE_LOCAL_NAME_SHORT, DATA_TYPE_LOCAL_NAME_COMPLETE -> localName = String(
+          this.copyOfRange(pos, pos + dataLength),
+        )
+
+        else -> {}
+      }
+      pos += dataLength
+    }
+    return localName
+  } catch (e: Exception) {
+    return null
+  }
 }
 
 @Composable
 private fun PairingDialogLayout(
   showDialog: MutableState<Boolean>,
-  getDevices: suspend () -> List<BluetoothDevice>,
+  scanDevices: () -> Flow<List<BluetoothDevice>?>,
   pairDevice: suspend (BluetoothDevice) -> Boolean
 ) {
   val scope = rememberCoroutineScope()
   val pairingState = rememberSaveable { mutableStateOf<PairingState>(PairingState.SCAN) }
-  val devices = remember { mutableStateOf<List<BluetoothDevice>?>(null) }
+  var deviceScanner by remember { mutableStateOf(scanDevices()) }
 
   LaunchedEffect(showDialog.value) {
     if (!showDialog.value) {
@@ -745,7 +793,11 @@ private fun PairingDialogLayout(
 
   if (showDialog.value) {
     AlertDialog(
-      onDismissRequest = { /* Do nothing */ },
+      onDismissRequest = {
+        if (pairingState.value == PairingState.SCAN) {
+          showDialog.value = false
+        }
+      },
       title = {
         when (pairingState.value) {
           is PairingState.COMPLETE -> {
@@ -765,11 +817,7 @@ private fun PairingDialogLayout(
         Column(modifier = Modifier.fillMaxWidth()) {
           when (val state = pairingState.value) {
             PairingState.SCAN -> {
-              LaunchedEffect(Unit) {
-                devices.value = null
-                devices.value = getDevices()
-              }
-
+              val devices = deviceScanner.collectAsStateWithLifecycle(null)
               val currentDevices = devices.value
 
               if (currentDevices == null) {
@@ -836,14 +884,8 @@ private fun PairingDialogLayout(
         when (pairingState.value) {
           PairingState.SCAN -> {
             TextButton(
-              enabled = devices.value != null,
               onClick = {
-                if (devices.value != null) {
-                  scope.launch {
-                    devices.value = null
-                    devices.value = getDevices()
-                  }
-                }
+                deviceScanner = scanDevices()
               }
             ) { Text("Rescan") }
           }
@@ -868,7 +910,7 @@ private fun PairingDialogLayout(
 }
 
 @Parcelize
-data class BluetoothDevice(val name: String, val address: String) : Parcelable
+data class BluetoothDevice(val name: String, val address: String, val detail: PlatformAdvertisement) : Parcelable
 
 @Parcelize
 sealed class PairingState : Parcelable {

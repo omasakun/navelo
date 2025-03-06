@@ -1,15 +1,16 @@
-@file:OptIn(ExperimentalUuidApi::class, ExperimentalApi::class)
+@file:OptIn(ExperimentalUuidApi::class, ExperimentalApi::class, ExperimentalUuidApi::class, ObsoleteKableApi::class)
 
 package net.o137.navelo
 
+import android.bluetooth.le.ScanSettings
 import android.util.Log
 import com.juul.kable.ExperimentalApi
+import com.juul.kable.ObsoleteKableApi
 import com.juul.kable.Peripheral
 import com.juul.kable.Scanner
 import com.juul.kable.WriteType.WithResponse
 import com.juul.kable.characteristic
 import com.juul.kable.characteristicOf
-import com.juul.kable.logs.Logging.Level.Events
 import com.juul.kable.service
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -74,11 +75,13 @@ class NaveloDevice(private val peripheral: Peripheral) {
 
     val scanner by lazy {
       Scanner {
-        logging {
-          level = Events
-        }
+        scanSettings = ScanSettings.Builder()
+          .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+          .build()
         filters {
-          match { services = listOf(Uuids.movementService) }
+          match {
+            services = listOf(Uuids.movementService)
+          }
         }
       }
     }
@@ -95,6 +98,7 @@ class NaveloDevice(private val peripheral: Peripheral) {
     } catch (e: IOException) {
       Log.e(TAG, "Connection attempt failed", e)
       peripheral.disconnect()
+      throw e
     }
   }
 
