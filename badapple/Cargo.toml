@@ -1,0 +1,11 @@
+[package]
+name = "badapple"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.97"
+bitvec = "1.0.1"
+ffmpeg-sidecar = "2.0.5"
+flate2 = "1.1.0"
+image = "0.25.5"
