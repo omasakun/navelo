@@ -4,7 +4,7 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use flate2::read::DeflateDecoder;
 use image::{GrayImage, Luma};
 use std::cmp;
-use std::fs::{create_dir_all, remove_dir_all, File};
+use std::fs::{create_dir_all, remove_dir_all, remove_file, File};
 use std::io::Read;
 use std::iter::repeat;
 use std::path::Path;
@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
   }
 
   println!("Encoding video...");
+  let _ = remove_file("data/reconstructed.mp4");
   FfmpegCommand::new()
     .input("data/frames/%06d.png")
     .args(["-r", "20", "-pix_fmt", "yuv420p", "-crf", "23", "-preset", "slow"])

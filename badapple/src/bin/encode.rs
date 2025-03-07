@@ -42,11 +42,35 @@ fn main() -> anyhow::Result<()> {
 fn bitvec_from_frame(frame: &OutputVideoFrame) -> BitVec<u8, Msb0> {
   let mut bits = BitVec::<u8, Msb0>::new();
   for chunk in frame.data.chunks(3) {
-    let gray_value = (0.299 * chunk[0] as f32 + 0.587 * chunk[1] as f32 + 0.114 * chunk[2] as f32) as u8;
-    let bit = gray_value > 128;
+    let bit = is_color_bright(chunk[0], chunk[1], chunk[2]);
     bits.push(bit);
   }
   bits
+}
+
+// better compression
+#[allow(dead_code)]
+fn bitvec_from_frame_v2(frame: &OutputVideoFrame) -> BitVec<u8, Msb0> {
+  let mut bits = BitVec::<u8, Msb0>::new();
+  let width = frame.width as usize;
+  let height = frame.height as usize;
+  let data = &frame.data;
+
+  for x in (0..width).step_by(8) {
+    for y in 0..height {
+      for dx in 0..8 {
+        let index = (y * width + (x + dx)) * 3;
+        let bit = is_color_bright(data[index], data[index + 1], data[index + 2]);
+        bits.push(bit);
+      }
+    }
+  }
+  bits
+}
+
+fn is_color_bright(red: u8, green: u8, blue: u8) -> bool {
+  let gray_value = (0.299 * red as f32 + 0.587 * green as f32 + 0.114 * blue as f32) as u8;
+  gray_value > 128
 }
 
 fn count_run_lengths<T: BitStore, O: BitOrder>(bits: &BitVec<T, O>) -> Vec<u32> {
