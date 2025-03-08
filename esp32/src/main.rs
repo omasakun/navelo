@@ -46,11 +46,11 @@ pub fn main_display() -> anyhow::Result<()> {
   let sclk = peripherals.pins.gpio19;
   let sdo = peripherals.pins.gpio18;
   let sdi = Option::<AnyInputPin>::None;
-  let cs = peripherals.pins.gpio16;
+  let cs = peripherals.pins.gpio20;
 
-  let reset = PinDriver::output(peripherals.pins.gpio20)?;
-  let busy = PinDriver::input(peripherals.pins.gpio21)?;
-  let dc = PinDriver::output(peripherals.pins.gpio17)?;
+  let reset = PinDriver::output(peripherals.pins.gpio17)?;
+  let busy = PinDriver::input(peripherals.pins.gpio16)?;
+  let dc = PinDriver::output(peripherals.pins.gpio21)?;
 
   let spi_config = spi::config::Config::new().baudrate(20.MHz().into());
   let spi_driver = SpiDriver::new(spi, sclk, sdo, sdi, &SpiDriverConfig::new())?;
